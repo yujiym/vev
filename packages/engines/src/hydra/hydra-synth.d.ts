@@ -48,7 +48,15 @@ declare module 'hydra-synth' {
     [key: string]: unknown
   }
 
+  /**
+   * `destroy()` only clears regl's own bookkeeping (buffers, textures, event
+   * listeners) — confirmed by reading regl 1.7.0's `dist/regl.js`: its `destroy`
+   * never calls the `WEBGL_lose_context` extension. `_gl` is regl's own
+   * documented escape hatch to the raw `WebGLRenderingContext`, needed to force
+   * the context to actually release (compositor.ts's `dispose()`).
+   */
   export interface ReglInstance {
+    readonly _gl: WebGLRenderingContext
     destroy: () => void
   }
 
