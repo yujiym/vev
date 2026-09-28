@@ -4,7 +4,14 @@ import type { Clip } from '@vev/shared'
 import { describe, expect, it, vi } from 'vitest'
 
 import type { ClipFormInput, ProbeFn } from './register-clip.ts'
-import { buildNewClip, prefillFromCode, runProbe, submitClip, submitThumbnail } from './register-clip.ts'
+import {
+  applyPrefill,
+  buildNewClip,
+  prefillFromCode,
+  runProbe,
+  submitClip,
+  submitThumbnail,
+} from './register-clip.ts'
 
 const HEADER_CODE =
   '// @author Khoparzi\n// license: CC BY 4.0\n// source: https://hydra.ojack.xyz/?sketch=1\nosc(10).out()'
@@ -34,6 +41,52 @@ describe(prefillFromCode, () => {
   it('defaults license to "unknown" — never invented — and author to empty for headerless code', () => {
     const prefill = prefillFromCode(HEADERLESS_CODE)
     expect(prefill).toStrictEqual({ author: '', license: 'unknown', sourceUrl: undefined })
+  })
+})
+
+describe(applyPrefill, () => {
+  it('fills in every field that is still empty', () => {
+    const result = applyPrefill(
+      { author: '', license: '', sourceUrl: '' },
+      { author: 'Khoparzi', license: 'CC BY 4.0', sourceUrl: 'https://hydra.ojack.xyz/?sketch=1' },
+    )
+    expect(result).toStrictEqual({
+      author: 'Khoparzi',
+      license: 'CC BY 4.0',
+      sourceUrl: 'https://hydra.ojack.xyz/?sketch=1',
+    })
+  })
+
+  it('leaves fields the registrant already typed untouched, even when the prefill disagrees', () => {
+    const result = applyPrefill(
+      { author: 'A human typed this', license: 'MIT', sourceUrl: 'https://example.test/mine' },
+      { author: 'Khoparzi', license: 'CC BY 4.0', sourceUrl: 'https://hydra.ojack.xyz/?sketch=1' },
+    )
+    expect(result).toStrictEqual({
+      author: 'A human typed this',
+      license: 'MIT',
+      sourceUrl: 'https://example.test/mine',
+    })
+  })
+
+  it('leaves sourceUrl empty when the prefill found none, rather than writing "undefined"', () => {
+    const result = applyPrefill(
+      { author: '', license: '', sourceUrl: '' },
+      { author: '', license: 'unknown' },
+    )
+    expect(result.sourceUrl).toBe('')
+  })
+
+  it('fills in only the empty fields when some are already typed', () => {
+    const result = applyPrefill(
+      { author: '', license: 'GPL-3.0', sourceUrl: '' },
+      { author: 'Khoparzi', license: 'CC BY 4.0', sourceUrl: 'https://hydra.ojack.xyz/?sketch=1' },
+    )
+    expect(result).toStrictEqual({
+      author: 'Khoparzi',
+      license: 'GPL-3.0',
+      sourceUrl: 'https://hydra.ojack.xyz/?sketch=1',
+    })
   })
 })
 

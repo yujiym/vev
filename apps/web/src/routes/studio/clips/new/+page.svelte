@@ -2,6 +2,7 @@
 <script lang="ts">
   import type { ClipFormInput } from '$lib/register-clip.ts'
   import {
+    applyPrefill,
     buildNewClip,
     captureThumbnail,
     prefillFromCode,
@@ -62,21 +63,9 @@
     }
 
     const prefill = prefillFromCode(code)
-    // A conditional "fill in only if the registrant hasn't already typed something" assignment,
-    // not a one-shot unpacking of `prefill` — destructuring doesn't express "only when empty", so
-    // this is a deliberate exception to the object-destructuring preference.
-    if (author === '') {
-      // oxlint-disable-next-line eslint/prefer-destructuring
-      author = prefill.author
-    }
-    if (license === '') {
-      // oxlint-disable-next-line eslint/prefer-destructuring
-      license = prefill.license
-    }
-    if (sourceUrl === '' && prefill.sourceUrl !== undefined) {
-      // oxlint-disable-next-line eslint/prefer-destructuring
-      sourceUrl = prefill.sourceUrl
-    }
+    // The "only fill in what's still empty" decision lives in `applyPrefill` (register-clip.ts),
+    // tested there — this is just wiring its result back onto the three form fields.
+    ;({ author, license, sourceUrl } = applyPrefill({ author, license, sourceUrl }, prefill))
 
     probing = true
     probeResult = undefined

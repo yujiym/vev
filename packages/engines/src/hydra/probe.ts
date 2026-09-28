@@ -1,21 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import type { Clock } from '../clock.ts'
 import { HydraCompositor } from './compositor.ts'
+import { framesDiffer } from './frame-diff.ts'
 
 /** How many ticks the probe advances before sampling — enough for a `.out()` chain to settle past its first (often still-clearing) frame. */
 const PROBE_FRAMES = 6
 
 /** Milliseconds of wall-clock advanced per probed tick — a nominal 30fps, independent of the caller's real frame rate. */
 const PROBE_TICK_MS = 1000 / 30
-
-/**
- * A frame is judged rendered, not merely cleared, once its sampled pixels vary by at least this
- * much (0-255 scale) across a channel. Deliberately low: the point is to tell a genuinely
- * unrendered canvas (uniformly the WebGL clear colour) apart from real — possibly very dark —
- * content, not to demand visual busyness. See the module doc below for why this is a variance
- * check and not a magnitude check.
- */
-const VARIANCE_THRESHOLD = 2
 
 /**
  * A single probed tick may not take longer than this to run, or the clip is judged unfit for the
@@ -52,59 +44,11 @@ const sampleCanvas = async (canvas: HTMLCanvasElement): Promise<Uint8ClampedArra
   }
 }
 
-/**
- * Whether sampled RGBA pixels show real spatial variation, as opposed to a uniform buffer.
- *
- * This checks *variance*, not magnitude — a frame is judged rendered once its pixels differ from
- * one another by `VARIANCE_THRESHOLD` or more on some channel, regardless of how dark or bright
- * those pixels are. A magnitude check ("are pixels non-zero") would reject every dark clip,
- * including M1's `quiet` fixture — a slow, low-brightness gradient that is nonetheless genuinely
- * rendering. A truly unrendered canvas (still at WebGL's clear colour) is uniform and has zero
- * variance regardless of what that clear colour is; real content, however dark, is not uniform.
- *
- * The accepted trade-off: a clip that deliberately renders one flat, unvarying colour across the
- * whole frame reads the same as an unrendered one and is rejected too. Spec §11.2 asks for "not a
- * black frame", not "not a flat frame" — this is the closest a pixel-only check can get without
- * false-rejecting legitimate dark clips, which is the failure mode named in the M2 brief.
- */
-export const hasFrameVariance = (pixels: Uint8ClampedArray): boolean => {
-  let minR = 255
-  let maxR = 0
-  let minG = 255
-  let maxG = 0
-  let minB = 255
-  let maxB = 0
-
-  for (let i = 0; i + 3 < pixels.length; i += 4) {
-    const r = pixels[i]
-    const g = pixels[i + 1]
-    const b = pixels[i + 2]
-    if (r < minR) {
-      minR = r
-    }
-    if (r > maxR) {
-      maxR = r
-    }
-    if (g < minG) {
-      minG = g
-    }
-    if (g > maxG) {
-      maxG = g
-    }
-    if (b < minB) {
-      minB = b
-    }
-    if (b > maxB) {
-      maxB = b
-    }
-  }
-
-  return (
-    maxR - minR >= VARIANCE_THRESHOLD ||
-    maxG - minG >= VARIANCE_THRESHOLD ||
-    maxB - minB >= VARIANCE_THRESHOLD
-  )
-}
+/** The WebGL context regl/Hydra already created on `canvas`, however it was requested. `getContext` with a matching type returns the SAME context, not a new one. */
+const existingGlContext = (
+  canvas: HTMLCanvasElement,
+): WebGL2RenderingContext | WebGLRenderingContext | null =>
+  canvas.getContext('webgl2') ?? canvas.getContext('webgl')
 
 /**
  * Runs a clip through the ordinary render path and reports whether it clears spec §11.2's gate:
@@ -120,13 +64,33 @@ export const hasFrameVariance = (pixels: Uint8ClampedArray): boolean => {
  * probing and disposing all happen against it here; the caller owns creating and discarding that
  * canvas (see the registration page, which disposes the compositor immediately after use, per
  * spec §6.5's cap on live WebGL contexts).
+ *
+ * The black-frame check (`framesDiffer`, `frame-diff.ts`) samples the canvas right after `mount()`
+ * as a baseline, before the clip has run at all, then again after loading, switching in, and
+ * ticking it — and fails only if the two samples are identical. See that module for why this
+ * replaced an earlier variance-only check that rejected legitimately uniform clips.
+ *
+ * The frame-budget loop forces a real GPU sync (`gl.readPixels` of a single pixel) after every
+ * tick. `compositor.tick()` only queues regl draw calls — a GPU driver is free to accept a queued
+ * command near-instantly and do the actual work later, so timing `tick()` alone measures
+ * submission cost, not render cost, and can never catch an expensive clip. `readPixels` cannot
+ * return a correct result until every draw call that could affect the read region has actually
+ * finished, which is exactly the synchronisation point the budget check needs.
  */
 export const probeClip = async (code: string, canvas: HTMLCanvasElement): Promise<ProbeResult> => {
   const clock: Clock = { beatsPerBar: 4, bpm: 120, downbeatAt: Date.now() }
   const compositor = new HydraCompositor(clock)
 
+  let baseline: Uint8ClampedArray
   try {
     compositor.mount(canvas)
+    baseline = await sampleCanvas(canvas)
+  } catch (error) {
+    compositor.dispose()
+    return { error, ok: false, reason: 'render-error' }
+  }
+
+  try {
     compositor.load('a', code)
   } catch (error) {
     compositor.dispose()
@@ -140,12 +104,18 @@ export const probeClip = async (code: string, canvas: HTMLCanvasElement): Promis
     return { error, ok: false, reason: 'render-error' }
   }
 
+  const gl = existingGlContext(canvas)
+  const syncPixel = new Uint8Array(4)
+
   let maxFrameMs = 0
   try {
     let now = Date.now()
     for (let i = 0; i < PROBE_FRAMES; i += 1) {
       const start = performance.now()
       compositor.tick(now)
+      if (gl) {
+        gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, syncPixel)
+      }
       const frameMs = performance.now() - start
       if (frameMs > maxFrameMs) {
         maxFrameMs = frameMs
@@ -162,9 +132,9 @@ export const probeClip = async (code: string, canvas: HTMLCanvasElement): Promis
     return { maxFrameMs, ok: false, reason: 'budget-exceeded' }
   }
 
-  let pixels: Uint8ClampedArray
+  let after: Uint8ClampedArray
   try {
-    pixels = await sampleCanvas(canvas)
+    after = await sampleCanvas(canvas)
   } catch (error) {
     compositor.dispose()
     return { error, ok: false, reason: 'render-error' }
@@ -172,7 +142,7 @@ export const probeClip = async (code: string, canvas: HTMLCanvasElement): Promis
 
   compositor.dispose()
 
-  if (!hasFrameVariance(pixels)) {
+  if (!framesDiffer(baseline, after)) {
     return { maxFrameMs, ok: false, reason: 'black-frame' }
   }
 

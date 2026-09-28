@@ -59,6 +59,26 @@ export const prefillFromCode = (code: string): ClipPrefill => {
   return { author: info.author ?? '', license: info.license ?? 'unknown', sourceUrl: info.sourceUrl }
 }
 
+/** The prefillable subset of `ClipFormInput` — the fields `applyPrefill` can fill in. `sourceUrl` is always present (possibly `''`), unlike `ClipPrefill`'s optional one, since this is a live form field, not a detection result. */
+export interface PrefillableFields {
+  readonly author: string
+  readonly license: string
+  readonly sourceUrl: string
+}
+
+/**
+ * Fills in `current`'s empty fields from `prefill`, leaving anything the registrant already typed
+ * alone. This is a decision (what "already typed something" means, and that it wins over a fresh
+ * probe's re-detection), so it lives here — tested — rather than inline in the page's event
+ * handler, per ADR 0001: `.svelte` is outside the type and lint gate.
+ */
+export const applyPrefill = (current: PrefillableFields, prefill: ClipPrefill): PrefillableFields => ({
+  author: current.author === '' ? prefill.author : current.author,
+  license: current.license === '' ? prefill.license : current.license,
+  sourceUrl:
+    current.sourceUrl === '' && prefill.sourceUrl !== undefined ? prefill.sourceUrl : current.sourceUrl,
+})
+
 /**
  * Turns a filled-in form into the exact payload `POST /api/clips` accepts (`newClipSchema`).
  * Parsing through the schema client-side, not just server-side, means a registrant sees a
