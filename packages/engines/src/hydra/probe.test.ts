@@ -45,8 +45,11 @@ const MARKERS = {
 // `pnpm check` type-checks this file. Every marker is a block comment, which `rewriteOut`'s
 // scanner skips, so a marker never changes what the code under test counts as an `.out(` call.
 //
-// Self-contained (everything it needs is imported inside the factory) because `vi.mock` factories
-// run before the rest of this file's top-level bindings are initialised.
+// Its module imports stay inside the factory: `vi.mock` hoists this call above every `import` in
+// the file, so a top-level `import { rewriteOut }` would not be initialised when the hoisted call
+// is evaluated. `MARKERS` is different and is deliberately read from the outer scope — the factory
+// is not RUN at hoist time, only registered; it runs on the first import of `./compositor.ts`,
+// which is the `await import('./probe.ts')` below, by which point `MARKERS` is initialised.
 // oxlint-disable-next-line vitest/prefer-import-in-mock -- the factory dynamically imports instead, so its dependencies aren't evaluated before vi.mock's hoist
 vi.mock('./compositor.ts', async () => {
   const { rewriteOut } = await import('./rewrite.ts')
@@ -65,7 +68,7 @@ vi.mock('./compositor.ts', async () => {
     // this fake has no need for — except as the one channel that exists before any clip code does
     // (see `MARKERS.breaksTheSentinel`).
     mount(canvas: HTMLCanvasElement): void {
-      this.breaksTheSentinel = 'fakeBreaksTheSentinel' in canvas
+      this.breaksTheSentinel = MARKERS.breaksTheSentinel in canvas
     }
 
     load(slot: 'a' | 'b', code: string): void {
