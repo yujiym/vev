@@ -7,8 +7,9 @@ import type { ProbeResult } from './probe.ts'
 // module that touches `window` at import time and so cannot load under this package's Node
 // `vitest` environment (see `sentinel.ts`'s doc comment). This fake stands in for it: it runs the
 // real `rewriteOut` exactly as `HydraCompositor.load` does, and models a slot's buffer as either
-// freshly painted (when the rewritten code names that slot's own buffer) or left holding whatever
-// it held before (when it does not) — enough to drive `probeClip`'s sentinel logic honestly
+// freshly painted (when the rewritten code names that slot's own buffer, which — once past the
+// multi-output refusal, which never reaches `load` at all — `rewriteOut` now always arranges) or
+// left holding whatever it held before. Enough to drive `probeClip`'s sentinel logic honestly
 // without a real GPU. Self-contained (everything it needs is imported inside the factory) because
 // `vi.mock` factories run before the rest of this file's top-level bindings are initialised.
 // oxlint-disable-next-line vitest/prefer-import-in-mock -- the factory dynamically imports instead, so its dependencies aren't evaluated before vi.mock's hoist
@@ -57,23 +58,51 @@ vi.mock('./compositor.ts', async () => {
 
 const { probeClip } = await import('./probe.ts')
 
+const asFailure = (result: ProbeResult): Extract<ProbeResult, { ok: false }> => {
+  if (result.ok) {
+    throw new Error('expected a failing ProbeResult')
+  }
+  return result
+}
+
 describe(probeClip, () => {
-  it('fails with black-frame, not a throw, when the only out() names a buffer other than the slot', async () => {
+  it('rewrites a single named out() to the slot buffer, renders, and passes — the common pasted-Hydra shape', async () => {
+    const canvas = {} as HTMLCanvasElement
+
+    const result = await probeClip('osc(10).out(o0)', canvas)
+
+    expect(result.ok).toBe(true)
+  })
+
+  it('rewrites a single out() naming a different buffer, renders, and passes — the case that used to throw', async () => {
     const canvas = {} as HTMLCanvasElement
 
     const result = await probeClip('noise().out(o3)', canvas)
 
-    const failure = result as Extract<ProbeResult, { ok: false }>
-    expect(failure.ok).toBe(false)
-    expect(failure.reason).toBe('black-frame')
-    expect(failure.maxFrameMs).toBeTypeOf('number')
+    expect(result.ok).toBe(true)
   })
 
-  it('passes a clip whose bare out() gets rewritten to the slot buffer', async () => {
+  it('appends an out() when the clip has none, and still passes', async () => {
     const canvas = {} as HTMLCanvasElement
 
-    const result = await probeClip('osc(10).out()', canvas)
+    const result = await probeClip('osc(10)', canvas)
 
     expect(result.ok).toBe(true)
+  })
+
+  it('refuses two named out() calls with the multi-output reason', async () => {
+    const canvas = {} as HTMLCanvasElement
+
+    const result = await probeClip('osc(10).out(o1)\nnoise().out(o2)', canvas)
+
+    expect(asFailure(result).reason).toBe('multi-output')
+  })
+
+  it('refuses two bare out() calls with the multi-output reason too', async () => {
+    const canvas = {} as HTMLCanvasElement
+
+    const result = await probeClip('osc(10).out()\nnoise().out()', canvas)
+
+    expect(asFailure(result).reason).toBe('multi-output')
   })
 })

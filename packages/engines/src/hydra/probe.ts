@@ -3,6 +3,7 @@ import type { Slot } from '@vev/shared'
 
 import type { Clock } from '../clock.ts'
 import { HydraCompositor } from './compositor.ts'
+import { countOutCalls } from './rewrite.ts'
 import { framesDiffer, isSentinelFill, SENTINEL_CODE } from './sentinel.ts'
 
 /** The slot the probe always runs a clip in — matches the show's slot `a` (spec §6.1). */
@@ -23,7 +24,12 @@ const PROBE_TICK_MS = 1000 / 30
 const FRAME_BUDGET_MS = 50
 
 /** Why a probe did not pass — a clip failing one of spec §11.2's checks is an expected outcome, not an exception (see `probeClip`'s doc comment). */
-export type ProbeFailureReason = 'black-frame' | 'budget-exceeded' | 'compile-error' | 'render-error'
+export type ProbeFailureReason =
+  | 'black-frame'
+  | 'budget-exceeded'
+  | 'compile-error'
+  | 'multi-output'
+  | 'render-error'
 
 export type ProbeResult =
   | { readonly maxFrameMs: number; readonly ok: true }
@@ -36,7 +42,8 @@ export type ProbeResult =
 
 /**
  * Runs a clip through the ordinary render path and reports whether it clears spec §11.2's gate:
- * compiles, renders without errors, is not a black frame, holds its frame budget.
+ * writes exactly one buffer, compiles, renders without errors, is not a black frame, holds its
+ * frame budget.
  *
  * Deliberately reuses `HydraCompositor.load` / `switchTo` exactly as the show does — `load('a',
  * code)` then `switchTo('a', { kind: 'cut', bars: 0 }, now)` — rather than a probe-specific
@@ -48,6 +55,14 @@ export type ProbeResult =
  * probing and disposing all happen against it here; the caller owns creating and discarding that
  * canvas (see the registration page, which disposes the compositor immediately after use, per
  * spec §6.5's cap on live WebGL contexts).
+ *
+ * **The multi-output check runs before anything is mounted, because it needs nothing GL-backed to
+ * answer.** A clip has exactly one buffer of its own (spec §6.1: the compositor owns
+ * `o0`/`o1`/`o2`/`o3`); `rewriteOut` (`rewrite.ts`) rewrites a clip's single `.out(...)` call —
+ * bare or named — to that buffer regardless of what it named, so this check only has to rule out
+ * the case `rewriteOut` itself refuses to guess at: two or more `.out(` calls, where there is no
+ * way to tell which one the clip's author meant. Refusing here, before `rewriteOut` ever runs,
+ * means a multi-output clip never gets a buffer it does not own written to it, not even once.
  *
  * **The black-frame check is a sentinel, not a baseline comparison.** Before the clip ever runs,
  * the probe fills the slot's own buffer with `SENTINEL_CODE` — a colour no clip produces by
@@ -68,6 +83,10 @@ export type ProbeResult =
  * result otherwise unused here) is exactly the synchronisation point the budget check needs.
  */
 const runProbe = (code: string, canvas: HTMLCanvasElement): ProbeResult => {
+  if (countOutCalls(code) > 1) {
+    return { ok: false, reason: 'multi-output' }
+  }
+
   const clock: Clock = { beatsPerBar: 4, bpm: 120, downbeatAt: Date.now() }
   const compositor = new HydraCompositor(clock)
 
