@@ -68,6 +68,35 @@ describe(rewriteOut, () => {
   it('does not mistake .output( for an output call', () => {
     expect(rewriteOut('osc(10).output(x).out()', 'a')).toBe('osc(10).output(x).out(o1)')
   })
+
+  it('finds a call hidden inside a template literal interpolation, and refuses alongside a trailing call', () => {
+    // oxlint-disable-next-line eslint/no-template-curly-in-string -- this is Hydra clip source text used as test fixture data, not a real interpolation
+    const code = 'text(`hello ${noise().out(o3)}`).out()'
+    expect(countOutCalls(code)).toBe(2)
+    expect(rewriteOut(code, 'a')).toBe(code)
+  })
+
+  it('rewrites the single call when it is the only one, even hidden inside an interpolation', () => {
+    // oxlint-disable-next-line eslint/no-template-curly-in-string -- this is Hydra clip source text used as test fixture data, not a real interpolation
+    expect(rewriteOut('text(`${noise().out(o3)}`)', 'a')).toBe('text(`${noise().out(o1)}`)')
+  })
+
+  it('changes nothing for an interpolation with no output call in it', () => {
+    // oxlint-disable-next-line eslint/no-template-curly-in-string -- this is Hydra clip source text used as test fixture data, not a real interpolation
+    expect(rewriteOut('text(`plain ${bpm} text`).out()', 'a')).toBe('text(`plain ${bpm} text`).out(o1)')
+  })
+
+  it('handles a template literal nested inside an interpolation', () => {
+    // oxlint-disable-next-line eslint/no-template-curly-in-string -- this is Hydra clip source text used as test fixture data, not a real interpolation
+    const code = 'text(`${`${noise().out(o3)}`}`).out()'
+    expect(countOutCalls(code)).toBe(2)
+    expect(rewriteOut(code, 'a')).toBe(code)
+  })
+
+  it('does not end an interpolation early on a brace that is inside a string inside it', () => {
+    // oxlint-disable-next-line eslint/no-template-curly-in-string -- this is Hydra clip source text used as test fixture data, not a real interpolation
+    expect(rewriteOut('osc(10).out(`${"}"}`)', 'a')).toBe('osc(10).out(o1)')
+  })
 })
 
 describe(countOutCalls, () => {

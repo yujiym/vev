@@ -7,120 +7,249 @@ const BUFFER: Record<Slot, string> = { a: 'o1', b: 'o2' }
 const IDENT_CHAR = /[$0-9A-Z_a-z]/u
 const WHITESPACE = /\s/u
 
-/**
- * If `code[i]` opens a line comment, block comment, or single/double/backtick-quoted string, the
- * index just past it; otherwise `i` unchanged. Template-literal `${...}` interpolations are not
- * parsed back into code — treating the whole literal as opaque text is a deliberate simplification
- * for clip source, which does not need it, over building a real tokenizer.
- */
-const skipTrivia = (code: string, i: number): number => {
-  if (code[i] === '/' && code[i + 1] === '/') {
-    let j = i + 2
-    while (j < code.length && code[j] !== '\n') {
-      j += 1
-    }
-    return j
-  }
-
-  if (code[i] === '/' && code[i + 1] === '*') {
-    let j = i + 2
-    while (j < code.length && !(code[j] === '*' && code[j + 1] === '/')) {
-      j += 1
-    }
-    return Math.min(j + 2, code.length)
-  }
-
-  if (code[i] === "'" || code[i] === '"' || code[i] === '`') {
-    const quote = code[i]
-    let j = i + 1
-    while (j < code.length && code[j] !== quote) {
-      j += code[j] === '\\' ? 2 : 1
-    }
-    return j + 1
-  }
-
-  return i
-}
-
-/** The index just past `code`'s matching `)` for the `(` at `openIndex`, or -1 if it is never closed. Walks through nested parens and, via `skipTrivia`, through any comments or strings in between — so a `)` inside a string argument is never mistaken for the call's own close. */
-const matchParen = (code: string, openIndex: number): number => {
-  let depth = 0
-  let i = openIndex
-
-  while (i < code.length) {
-    const skipped = skipTrivia(code, i)
-    if (skipped !== i) {
-      i = skipped
-      continue
-    }
-
-    if (code[i] === '(') {
-      depth += 1
-    } else if (code[i] === ')') {
-      depth -= 1
-      if (depth === 0) {
-        return i + 1
-      }
-    }
-
-    i += 1
-  }
-
-  return -1
-}
-
 interface OutCall {
   readonly end: number
   readonly start: number
 }
 
+/** A `.out(`'s own argument list, open until its matching `)`. `outCallStart` (the index of the `.`) is what lets closing it record the finished span in `calls`. */
+interface ParenRegion {
+  depth: number
+  readonly closesOn: ')'
+  readonly outCallStart?: number
+}
+
+/** A template literal's `${...}` interpolation, open until its matching `}`. */
+interface BraceRegion {
+  depth: number
+  readonly closesOn: '}'
+}
+
+/** The clip itself: live code, open until the end of the string, with no closing character of its own. */
+interface TopRegion {
+  readonly closesOn: null
+}
+
+/** A backtick string's literal text — inert, unlike the three regions above, all of which are live code scanned the same way. */
+interface TemplateRegion {
+  readonly kind: 'template'
+}
+
+type CodeRegion = BraceRegion | ParenRegion | TopRegion
+type Region = CodeRegion | TemplateRegion
+
+const isTemplateRegion = (region: Region): region is TemplateRegion => 'kind' in region
+
+const skipLineComment = (code: string, i: number): number => {
+  let j = i + 2
+  while (j < code.length && code[j] !== '\n') {
+    j += 1
+  }
+  return j
+}
+
+const skipBlockComment = (code: string, i: number): number => {
+  let j = i + 2
+  while (j < code.length && !(code[j] === '*' && code[j + 1] === '/')) {
+    j += 1
+  }
+  return Math.min(j + 2, code.length)
+}
+
+/** Single- or double-quoted string only. A backtick template literal is handled by `advanceInTemplate`/`advanceInCode` instead, since — unlike these — it can contain live `${...}` code. */
+const skipString = (code: string, i: number): number => {
+  const quote = code[i]
+  let j = i + 1
+  while (j < code.length && code[j] !== quote) {
+    j += code[j] === '\\' ? 2 : 1
+  }
+  return j + 1
+}
+
+/** Tracks `region`'s own paren nesting when `code[i]` is `(` or `)`; pops and records the finished call span in `calls` on the matching close. Returns the index just past `code[i]`, or `undefined` if `code[i]` is neither. */
+const advanceParenRegion = (
+  region: ParenRegion,
+  code: string,
+  i: number,
+  stack: Region[],
+  calls: OutCall[],
+): number | undefined => {
+  if (code[i] === '(') {
+    region.depth += 1
+    return i + 1
+  }
+
+  if (code[i] === ')') {
+    if (region.depth === 0) {
+      stack.pop()
+      if (region.outCallStart !== undefined) {
+        calls.push({ end: i + 1, start: region.outCallStart })
+      }
+      return i + 1
+    }
+    region.depth -= 1
+    return i + 1
+  }
+
+  return undefined
+}
+
+/** Tracks `region`'s own brace nesting when `code[i]` is `{` or `}` — an object literal or block inside the interpolation nests first, so this is what keeps it from being mistaken for the interpolation's own close. Returns the index just past `code[i]`, or `undefined` if `code[i]` is neither. */
+const advanceBraceRegion = (
+  region: BraceRegion,
+  code: string,
+  i: number,
+  stack: Region[],
+): number | undefined => {
+  if (code[i] === '{') {
+    region.depth += 1
+    return i + 1
+  }
+
+  if (code[i] === '}') {
+    if (region.depth === 0) {
+      stack.pop()
+      return i + 1
+    }
+    region.depth -= 1
+    return i + 1
+  }
+
+  return undefined
+}
+
+/** If `code[i]` is the `.` of a real `.out(` call — matching whitespace between the dot and `out` and between `out` and `(`, and never a longer identifier that merely starts the same way (`.output(`) — pushes a new `ParenRegion` for its argument list and returns the index just past the `(`; otherwise `undefined`. */
+const tryEnterOutCall = (code: string, i: number, stack: Region[]): number | undefined => {
+  const n = code.length
+  let j = i + 1
+  while (j < n && WHITESPACE.test(code[j])) {
+    j += 1
+  }
+
+  if (code.slice(j, j + 3) !== 'out' || IDENT_CHAR.test(code[j + 3] ?? '')) {
+    return undefined
+  }
+
+  let k = j + 3
+  while (k < n && WHITESPACE.test(code[k])) {
+    k += 1
+  }
+
+  if (code[k] !== '(') {
+    return undefined
+  }
+
+  stack.push({ closesOn: ')', depth: 0, outCallStart: i })
+  return k + 1
+}
+
+/** One step of the scan while inside a `TemplateRegion`: an escape, the closing backtick, the start of an interpolation (pushes a `BraceRegion`), or an ordinary character of the literal's text. */
+const advanceInTemplate = (code: string, i: number, stack: Region[]): number => {
+  if (code[i] === '\\') {
+    return i + 2
+  }
+
+  if (code[i] === '`') {
+    stack.pop()
+    return i + 1
+  }
+
+  if (code[i] === '$' && code[i + 1] === '{') {
+    stack.push({ closesOn: '}', depth: 0 })
+    return i + 2
+  }
+
+  return i + 1
+}
+
+/** One step of the scan while inside a `CodeRegion` (`top`, a `.out(`'s arguments, or an interpolation) — a comment, a string, the start of a template literal, this region's own bracket tracking, a real `.out(` call, or an ordinary character. */
+const advanceInCode = (
+  code: string,
+  i: number,
+  region: CodeRegion,
+  stack: Region[],
+  calls: OutCall[],
+): number => {
+  if (code[i] === '/' && code[i + 1] === '/') {
+    return skipLineComment(code, i)
+  }
+
+  if (code[i] === '/' && code[i + 1] === '*') {
+    return skipBlockComment(code, i)
+  }
+
+  if (code[i] === "'" || code[i] === '"') {
+    return skipString(code, i)
+  }
+
+  if (code[i] === '`') {
+    stack.push({ kind: 'template' })
+    return i + 1
+  }
+
+  if (region.closesOn === ')') {
+    const next = advanceParenRegion(region, code, i, stack, calls)
+    if (next !== undefined) {
+      return next
+    }
+  }
+
+  if (region.closesOn === '}') {
+    const next = advanceBraceRegion(region, code, i, stack)
+    if (next !== undefined) {
+      return next
+    }
+  }
+
+  if (code[i] === '.') {
+    const next = tryEnterOutCall(code, i, stack)
+    if (next !== undefined) {
+      return next
+    }
+  }
+
+  return i + 1
+}
+
 /**
  * Every real `.out(...)` call in `code`, as `{ start, end }` spans covering the dot through the
- * matching `)` — never a `.out(` that is inside a comment or a string, and never a longer
- * identifier that merely starts the same way (`.output(`). This is a scanner over code positions,
- * not a regex over raw source: a regex cannot tell a live `.out(` from one sitting inside
- * `// commented out code` or `"a string mentioning .out()"`, which is exactly how an earlier
- * version of this file both miscounted a commented-out call as real AND missed
- * `osc(10). out (o3)` (whitespace between the dot and `out`, or between `out` and `(`, is legal
- * JavaScript and must still be recognised as the same call).
+ * matching `)` — never one inside a comment, a string, or inert template-literal text, but
+ * including one hidden inside a template literal's live `${...}` interpolation (which genuinely
+ * executes: `` text(`hello ${noise().out(o3)}`) `` would otherwise count zero calls while the clip
+ * silently writes a buffer it does not own — structurally the same failure a plain `.out(` regex
+ * over raw source has, just reached through a narrower path).
+ *
+ * This is a single-pass, explicit-stack scanner over code positions (`Region` above), not a regex
+ * or a set of mutually recursive functions: a `${...}` interpolation can itself contain a nested
+ * template literal with its own interpolation, arbitrarily deep, and an explicit stack (pushed by
+ * `advanceInCode`/`advanceInTemplate`/`tryEnterOutCall`, popped by `advanceParenRegion`/
+ * `advanceBraceRegion`/`advanceInTemplate`) handles that without the scanner needing to call
+ * itself.
+ *
+ * **Deliberately out of scope: regex literals.** This scanner has no notion of a `/…/` regex
+ * literal, so one containing something that merely looks like `.out(`, a comment marker, or a
+ * quote gets walked into as if it were division followed by ordinary code, and could be
+ * double-counted as a real call — refusing an otherwise legitimate clip. Telling a regex literal
+ * from division apart syntactically needs to know whether the previous token was an operand or an
+ * operator, which is where hand-written JS lexers classically go wrong, and the failure mode here
+ * is a refusal the author can see and rephrase (drop the regex, or move the `.out(` call outside
+ * it) — the opposite direction from the silent-miswrite hole this scanner exists to close. Weighed
+ * and left out, not missed.
  */
 const findOutCalls = (code: string): OutCall[] => {
   const calls: OutCall[] = []
-  const n = code.length
+  const stack: Region[] = [{ closesOn: null }]
   let i = 0
 
-  while (i < n) {
-    const skipped = skipTrivia(code, i)
-    if (skipped !== i) {
-      i = skipped
-      continue
+  while (i < code.length) {
+    const region = stack.at(-1)
+    if (!region) {
+      break
     }
 
-    if (code[i] === '.') {
-      const start = i
-      let j = i + 1
-      while (j < n && WHITESPACE.test(code[j])) {
-        j += 1
-      }
-
-      if (code.slice(j, j + 3) === 'out' && !IDENT_CHAR.test(code[j + 3] ?? '')) {
-        let k = j + 3
-        while (k < n && WHITESPACE.test(code[k])) {
-          k += 1
-        }
-
-        if (code[k] === '(') {
-          const end = matchParen(code, k)
-          if (end !== -1) {
-            calls.push({ end, start })
-            i = end
-            continue
-          }
-        }
-      }
-    }
-
-    i += 1
+    i = isTemplateRegion(region)
+      ? advanceInTemplate(code, i, stack)
+      : advanceInCode(code, i, region, stack, calls)
   }
 
   return calls
