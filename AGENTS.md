@@ -23,9 +23,9 @@ Vite+ (`vp`) drives tests, lint (oxlint) and format (oxfmt) from the root `vite.
 
 ## Repository status
 
-The pnpm workspace and Vite+ toolchain exist (M0 in §18); the `apps/*` and `packages/*` workspaces they target do not yet.
+M0 (§18) is built: `apps/api` (Hono Worker; owns the D1/assets bindings and serves `apps/web`'s build as static assets), `apps/web` (SvelteKit SPA, `adapter-static`), and `packages/shared` (Valibot API schemas) all exist and are populated.
 
-The layout planned in §4.1 (`apps/web`, `apps/api`, `packages/{shared,engines,ingest,decision}`, `services/decision-server`) is a target, not a scaffold to assume.
+The rest of §4.1's layout is still a target, not a scaffold to assume: `packages/engines`, `packages/ingest`, `packages/decision`, and `services/decision-server` do not exist yet.
 
 ## Language
 

@@ -32,11 +32,11 @@
     // `--env local` is local mode (§15.3) and never deploys: it takes no routes
     // and no custom domain.
     "local": {
-      // Verified empirically (Task 6): `assets` IS inherited from the top
-      // level by a named environment, but `vars` and `d1_databases` are NOT
-      // (Task 4 hit the same for `d1_databases`) — wrangler even warns at
-      // startup if `vars` is missing here. So only `vars` and `d1_databases`
-      // are repeated; `assets` is intentionally omitted.
+      // Verified empirically: `assets` IS inherited from the top level by a
+      // named environment, but `vars` and `d1_databases` are NOT — removing
+      // either block here (with wrangler dev --env local) produced a startup
+      // warning and a missing binding. So only `vars` and `d1_databases` are
+      // repeated; `assets` is intentionally omitted.
       "vars": {
         "GIT_COMMIT": "dev",
         "SOURCE_URL": "https://github.com/oboroxyz/vev",
