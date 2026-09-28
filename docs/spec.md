@@ -1,3 +1,5 @@
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+
 # vev — AI-assisted Live Visual Sequencer
 
 The specification: what vev is, and how it is meant to work. It is the authority the code answers to, and the document every milestone is read against.
