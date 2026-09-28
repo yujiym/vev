@@ -16,7 +16,7 @@ Free software, self-hosted: there is no shared service to sign up for. You deplo
 
 ## Status
 
-**Early. M0 only.** The scaffold is built and verified: the workspace, the Hono Worker with D1, the SvelteKit SPA it serves, and the CI gate. There is no playback yet — no engine, no clips, no candidates. Everything past that is designed, not written.
+**Early. M0 and M1.** The scaffold is built and verified: the workspace, the Hono Worker with D1, the SvelteKit SPA it serves, and the CI gate. Playback exists now, in its smallest form: a pure reducer decides when a switch happens, a Hydra compositor renders it, and a control window and a separate output window stay in sync over `BroadcastChannel` by sharing a wall-clock timestamp rather than trusting message delivery time. Two fixture clips — not a library — switch with a cut or a 2-bar crossfade, the only two transitions built so far (§9.1 lists more; they are not written). Control is a debug panel, not the control screen of §12.1: buttons, no candidates, no chat. There is no clip library, no decision model, and no candidate ranking yet. Everything past that is designed, not written.
 
 [`docs/spec.md`](docs/spec.md) is the specification and the authority; its §18 tracks what is built against what is planned. Nothing in this README describes a feature that does not exist.
 

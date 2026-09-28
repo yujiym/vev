@@ -1,0 +1,30 @@
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+
+# 0004: Playback state as a pure reducer, and why that is not enough on its own
+
+## Context
+
+Playback timing is the part of vev that cannot be debugged live: a mistimed switch is visible to an audience and gone before anyone can inspect it, and WebGL cannot be exercised inside this toolchain's test runner — `hydra-synth` touches `window` at module load, so importing it in Vitest's default Node environment throws before any render is attempted. M1 needed to prove its exit condition — "two clips switch on a bar boundary" — in a way that does not depend on watching a recording and trusting an eyeball.
+
+The chosen shape: all playback decisions live in a pure reducer (`reduce` in `packages/engines/src/playback.ts`, driven by `Clock` in `clock.ts`), which takes a `PlaybackState` and a `PlaybackEvent` and returns the next `PlaybackState` — no canvas, no timers, no I/O. The control window owns this state and is the only thing that calls `reduce`. When the reducer arms a switch (Go pressed), the control window broadcasts a `switch` message carrying a wall-clock `at` — the next downbeat, computed by `Clock`, not "now" — over the message contract validated by `outputMessageSchema` in `packages/shared`. The output window never runs the reducer; it derives its own render progress from the same `at` and its own `now()`, through `fadeProgress`.
+
+## Decision
+
+Keep the reducer pure and keep it as the only place a switch decision gets made. Do not let the renderer make or re-derive that decision — it only executes a decision that already carries its own timestamp.
+
+## Consequences
+
+- "Switches on a bar boundary" is provable by unit test: `playback.test.ts` shows Go arming for the next downbeat rather than firing immediately, and swapping the slots exactly when that downbeat arrives — all of it as synchronous arithmetic against a fake clock, no rendering involved.
+- The control and output windows cannot drift apart when a `BroadcastChannel` message is delayed: both read `at` off the same message and compute progress from wall-clock time, not from when the message happened to arrive. `output-client.ts`'s `hello` handshake leans on this directly — a reloaded output window recovers the in-progress switch by re-reading the same `at` it would have received the first time.
+- The renderer keeps no state worth unit-testing on its own: `HydraCompositor` (`packages/engines/src/hydra/compositor.ts`) cannot be exercised outside a real WebGL context, so nothing of consequence was meant to live there.
+- The cost: every new transition needs its progress expressed as a pure function of time (`fadeProgress`-shaped) before it can be drawn at all — a transition whose progress cannot be written as `f(now, at, duration)` does not fit this design and has to be reconsidered rather than special-cased.
+
+## What this decision does not buy, discovered the hard way
+
+A pure reducer makes the _decision_ testable. It does nothing to guarantee the _renderer_ obeys that decision — that is a second, separate claim, and M1 shipped it false once before catching it.
+
+The control window published a `switch` message whose `at` was correctly one bar out; the message log proved it, and a reviewer independently recomputed the same bar-boundary arithmetic from that log and signed off. The milestone's exit condition was declared met on that evidence. It was wrong. `output-client.ts`'s `onSwitch` handler was calling `compositor.switchTo(message.to, message.transition, message.at)` _immediately_ on message receipt, and `HydraCompositor.switchTo` ignored its own `at` argument for a cut — it set the current slot and recomposed on the spot. A crossfade only _looked_ correctly scheduled, because `fadeProgress` happens to clamp its blend amount to 0 before `at`; a cut has no such clamp and simply flipped at click time. The recorded video showed a click-time flip. Nobody saw it, because the two pieces of evidence being cross-checked — the message log and the reviewer's arithmetic on that same log — were both downstream of the same bug: they proved the _intent_ was published on time, which was never in question, and said nothing about whether the _pixels_ obeyed it.
+
+The defect was found only when a later fix round re-traced the whole path end to end instead of re-checking the message log again, and it was fixed on the testable side of the seam: `output-client.ts` now holds an incoming `switch` in a local `pendingSwitch` and only calls `compositor.switchTo` once `now() >= pendingSwitch.at`, checked from the per-frame loop and from the message handler itself (so a later message can supersede an unapplied earlier one cleanly). `HydraCompositor` itself was not changed — it is the one piece of this path that cannot be unit-tested, so the fix was placed where a test could pin it down, not where the bug happened to live. Three new tests in `output-client.test.ts` hold a switch past a due frame before its `at`, assert supersession keeps only the latest message, and reproduce the two-message `hello` recovery sequence. The milestone's exit captures were then re-taken with a `Date.now()` overlay burned into the output window's own frames, so the timing claim is provable from the recorded pixels alone — a source independent of anything the code under test also produced — rather than from a message log the same defect could equally have left looking correct.
+
+**The lesson this ADR exists to keep**: a pure reducer makes a decision testable, but it does not make the renderer that consumes the decision obey it — that obligation lives on the other side of the `Compositor` interface and needs its own test, at the seam, in the one place (`output-client.ts`) that is not itself a rendering surface. And evidence used to check a claim has to come from somewhere the same defect could not also have produced — a message log generated by the code under test proves the code published the right intent, never that anything downstream acted on it.
