@@ -26,6 +26,8 @@ How to run vev locally and what bites. The design lives in [spec.md](./spec.md);
 - **`.svelte` templates are outside the gate.** `pnpm check` reaches a component's `<script>` block with syntactic rules only — no template linting, no type-aware rules — because `svelte-check` cannot run against TypeScript 7 (see [ADR 0001](./adr/0001-vite-plus-toolchain.md)). Keep logic in `.ts` and components thin.
 - **Wrangler's named environments inherit `assets` but not `vars` or `d1_databases`**, so those two are repeated under `env.local` in `apps/api/wrangler.jsonc`. Verified by removing each block and watching the binding disappear.
 
+- **The licence check only understands SPDX identifiers.** It compares each `license` field verbatim against an allow list of SPDX ids, so a package that spells its field loosely fails as unknown even when its licence is allowed. The first one vev meets is `hydra-synth`: the field reads `AGPL` where the `LICENSE` file is AGPL Version 3. Adding it in M1 fails `pnpm licenses:check` until `AGPL` is in the allow list in `scripts/check-licenses.mjs`, with that verification beside it. Add the exact string; do not loosen the comparison.
+
 ## Not wired yet
 
 Deployment is M12's milestone. Before it can work:

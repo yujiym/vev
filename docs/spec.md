@@ -156,8 +156,8 @@ At a venue the same built Worker runs on the performer's machine under a local w
 | Async jobs | Cloudflare Queues | LLM annotation and embeddings at ingestion |
 | Auth | Cloudflare Access | One owner / small team. Viewing public tracks needs no auth |
 | LLM | Claude API or similar: ingestion annotation (queue consumer) and chat interpretation (§8.6) | Never on the playback path — an interpretation applies to the next candidate request, and a slow one is simply late |
-| Hydra | `hydra-synth` (npm) | License to be confirmed (§17) |
-| textmode | `textmode.js` + `textmode.synth.js` | https://code.textmode.art/ |
+| Hydra | `hydra-synth` (npm) | AGPL-3.0 — verified 2026-09-28 against `ojack/hydra-synth`'s `LICENSE` (AGPL Version 3). Its `package.json` spells the field `AGPL`, which is not a valid SPDX id; see §14.1 |
+| textmode | `textmode.js` + `textmode.synth.js` | `textmode.js` MIT, `textmode.synth.js` AGPL-3.0 per npm metadata (2026-09-28); the LICENSE files themselves are unread. https://code.textmode.art/ |
 | ISF | An ISF renderer (e.g. interactive-shader-format-js family) | Selected in M9 |
 | Tooling | pnpm workspaces, wrangler, Vitest, Playwright (E2E) |  |
 
@@ -702,7 +702,7 @@ Generating clip code with a model is a later feature (§1), but a few MVP decisi
 - The whole monorepo is licensed under **AGPL-3.0-or-later**.
   - Reason: `hydra-synth` is AGPL-3.0 and is bundled into the JavaScript served to browsers; `textmode.synth.js` is a derivative of hydra-synth. Using AGPL for everything keeps the project simple and ensures that modified public deployments share their changes.
   - vev's own code could later be relicensed (e.g. `packages/decision` under MIT) only with the consent of all contributors to that code. Keep this in mind before accepting large external contributions.
-- **Dependency policy**: only dependencies whose licenses are compatible with AGPL-3.0 (MIT, BSD, Apache-2.0, ISC, MPL-2.0, LGPL, GPL-3.0, AGPL-3.0 …). CI runs a license check (e.g. `license-checker` / `pnpm licenses list`) and fails on unknown or incompatible licenses. Apache-2.0 is compatible with (A)GPL-3.0 but not GPL-2.0-only; GPL-2.0-only dependencies are not allowed.
+- **Dependency policy**: only dependencies whose licenses are compatible with AGPL-3.0 (MIT, BSD, Apache-2.0, ISC, MPL-2.0, LGPL, GPL-3.0, AGPL-3.0 …). CI runs a license check (`scripts/check-licenses.mjs` over `pnpm licenses list --prod --json`) and fails on unknown or incompatible licenses. Its allow list holds SPDX identifiers and nothing else, so a dependency that spells its `license` field loosely fails as unknown even when the licence itself is fine. `hydra-synth` is the first case vev will meet: its `package.json` says `AGPL` where its `LICENSE` file is AGPL Version 3. When M1 adds it, put that exact string in the allow list with the verification recorded beside it, rather than loosening the comparison for every package. Apache-2.0 is compatible with (A)GPL-3.0 but not GPL-2.0-only; GPL-2.0-only dependencies are not allowed.
 - **Source offer (AGPL §13)**: every page shows a "Source" link in the footer / about panel.
   - The link is built from `SOURCE_URL` (defaults to the upstream repository) and `GIT_COMMIT` injected at build time, pointing at the exact commit being served.
   - `apps/web` reads `SOURCE_URL` via `$env/dynamic/public`, but for a static SPA build that is not a runtime read: SvelteKit bakes it into the built `_app/env.js` at build time, from whatever `apps/web/.env` (or shell env) held during `vp build` — there is no server process for a static SPA to read a runtime environment variable from. A self-hoster repoints it at their own fork by rebuilding from that fork — the normal path, since every self-hoster deploys their own build (§15.1) — or, without rebuilding, by editing the served `_app/env.js` file directly on their deployed assets. `apps/api` already carries `SOURCE_URL` as a Worker var (`apps/api/wrangler.jsonc`); a later milestone can serve it from the API instead, so the SPA reads it at request time and the two copies stop being able to drift apart.
@@ -772,7 +772,7 @@ Local mode is how vev runs at a venue: the same artifact as the deployed one —
 - [ ] Workers AI `typesafe/jev`: exact request/response shape via the binding, pricing on Cloudflare, limits (max options per `choice`, context length), AI Gateway integration
 - [ ] System One wire format for `systemone-http` providers (TypeSafe, Kev, OpenRouter) and differences between them
 - [ ] Kev: recommended size for local use (0.6B/0.8B vs 4B), license of weights and base model
-- [ ] `textmode.js` / `textmode.synth.js` exact licenses (must be AGPL-compatible). editor.textmode.art is AGPL-3.0, so borrowing from it is license-compatible, but credit it properly if any code is reused
+- [ ] `textmode.js` / `textmode.synth.js` exact licenses. npm metadata says MIT and AGPL-3.0 respectively (2026-09-28), both AGPL-compatible; read the LICENSE files themselves before M8 ships them. editor.textmode.art is AGPL-3.0, so borrowing from it is license-compatible, but credit it properly if any code is reused
 - [ ] ISF renderer selection (WebGL2, multi-pass, audioFFT inputs, AGPL-compatible license)
 - [ ] Whether the "Deploy to Cloudflare" button supports all required bindings (D1, R2, Vectorize, Queues, AI)
 - [ ] Workers AI embedding model (Japanese support; dimensions must match the Vectorize index)
