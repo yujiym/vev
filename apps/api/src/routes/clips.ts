@@ -119,7 +119,15 @@ export const clipsRoutes = new Hono<{ Bindings: Env }>()
     // completely unrewritten, so such a clip would write another slot's buffer at playback with
     // no error anywhere. A gate that lives only in the registration screen is a suggestion; this
     // is the one the library's consumers can rely on.
-    if (body.engine === 'hydra' && countOutCalls(code) > 1) {
+    //
+    // Deliberately NOT scoped to `engine === 'hydra'`, unlike the dependency analysis below. The
+    // consumer makes no such distinction: `output-client.ts`'s `onLoad` hands ANY clip's code to
+    // `HydraCompositor.load` with no engine branch at all, so an `isf`-labelled clip with two
+    // `.out(` calls would write another slot's buffer exactly as a hydra one would. A guard that
+    // trusts a field its consumer ignores is not a guard. If a future engine genuinely has
+    // different output rules, this is the right place to find that out — by refusing it loudly —
+    // rather than the place to exempt it in advance.
+    if (countOutCalls(code) > 1) {
       return c.text(MULTI_OUTPUT_MESSAGE, 400)
     }
     // Ingestion only analyzes Hydra this milestone (§11.1); other engines get the empty deps

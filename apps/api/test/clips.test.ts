@@ -82,6 +82,34 @@ describe('POST /api/clips', () => {
     expect(response.status).toBe(400)
   })
 
+  it('refuses a two-output clip whatever engine it claims — the renderer makes no such distinction', async () => {
+    // `output-client.ts`'s `onLoad` hands any clip's code to `HydraCompositor.load` with no
+    // engine branch, so an isf-labelled clip with two `.out(` calls writes another slot's buffer
+    // exactly as a hydra one would. The gate must not trust a field its consumer ignores.
+    const response = await postClip({
+      ...minimalPayload(),
+      code: 'osc(10).out(o1)\nnoise(3).out(o2)',
+      engine: 'isf',
+      title: 'two outputs, isf',
+    })
+    expect(response.status).toBe(400)
+    await expect(response.text()).resolves.toMatch(/single .out\(/u)
+    const row = await env.DB.prepare('select count(*) as n from clips where title = ?')
+      .bind('two outputs, isf')
+      .first<{ n: number }>()
+    expect(row?.n).toBe(0)
+  })
+
+  it('still registers a single-output non-hydra clip, which the gate must not touch', async () => {
+    const response = await postClip({ ...minimalPayload(), code: 'osc(10).out()', engine: 'textmode' })
+    expect(response.status).toBe(201)
+    const body = await readJson<{ deps: { outputsUsed: string[] }; isolated: boolean }>(response)
+    // Dependency analysis is still Hydra-only (§11.1): a non-hydra clip gets the empty baseline
+    // rather than a guess, and is never isolated by inference.
+    expect(body.deps.outputsUsed).toStrictEqual([])
+    expect(body.isolated).toBe(false)
+  })
+
   it('counts .out( with the probe scanner, so a commented-out call is not stored as a used output', async () => {
     const response = await postClip({
       ...minimalPayload(),
