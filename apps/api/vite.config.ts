@@ -12,7 +12,13 @@ export default defineConfig({
     cloudflareTest(async () => ({
       miniflare: {
         bindings: {
+          // Deliberately different from `env.local`'s values ("dev" /
+          // "local") so the health tests can tell a real binding read apart
+          // from a route that hard-codes the literal `env.local` also uses.
+          // Do not "fix" these into agreement with `env.local`.
+          GIT_COMMIT: 'test-fixture-commit',
           TEST_MIGRATIONS: await readD1Migrations(path.join(import.meta.dirname, 'migrations')),
+          VEV_MODE: 'cloud',
         },
       },
       wrangler: { configPath: './wrangler.jsonc', environment: 'local' },
