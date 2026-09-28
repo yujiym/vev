@@ -24,9 +24,11 @@ describe('GET /api/health', () => {
   })
 
   it('counts the rows in the settings table', async () => {
+    const before = await SELF.fetch('https://vev.test/api/health')
+    const baseline = v.parse(healthResponseSchema, await before.json())
     await env.DB.prepare("insert into settings (key, value) values ('probe', '1')").run()
-    const response = await SELF.fetch('https://vev.test/api/health')
-    const parsed = v.parse(healthResponseSchema, await response.json())
-    expect(parsed.settingsRows).toBe(1)
+    const after = await SELF.fetch('https://vev.test/api/health')
+    const parsed = v.parse(healthResponseSchema, await after.json())
+    expect(parsed.settingsRows).toBe(baseline.settingsRows + 1)
   })
 })
