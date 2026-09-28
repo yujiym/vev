@@ -4,7 +4,7 @@
 
 ## Context
 
-vev deploys as one Worker that serves the SPA from its own assets binding (§3 of `docs/system-design.md`). That single deployable artifact can be built from two packages — a SvelteKit SPA and a Hono Worker, composed at deploy time — or from one unified package using `@cloudflare/vite-plugin`, which builds a SvelteKit app and a Worker together from a single Vite config.
+vev deploys as one Worker that serves the SPA from its own assets binding (§3 of `docs/spec.md`). That single deployable artifact can be built from two packages — a SvelteKit SPA and a Hono Worker, composed at deploy time — or from one unified package using `@cloudflare/vite-plugin`, which builds a SvelteKit app and a Worker together from a single Vite config.
 
 ## Decision
 

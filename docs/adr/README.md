@@ -2,7 +2,7 @@
 
 # Architecture decision records
 
-An ADR records a decision that shaped the code: the context that forced a choice, the alternatives weighed, and the consequences accepted. `docs/system-design.md` stays the description of the design as it stands; these records exist to explain why it is that way.
+An ADR records a decision that shaped the code: the context that forced a choice, the alternatives weighed, and the consequences accepted. `docs/spec.md` stays the description of the design as it stands; these records exist to explain why it is that way.
 
 ADRs are append-only. A decision that changes is recorded as a new ADR that supersedes the old one — never by rewriting a past record — so the history of what was tried and why stays intact.
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: AGPL-3.0-or-later
 #
-# Exercises M0's exit condition (docs/system-design.md §18): `pnpm live` —
+# Exercises M0's exit condition (docs/spec.md §18): `pnpm live` —
 # the built SPA served by the local Worker on one origin — actually serves
 # both the app and the API. CI never did this (I1 in the M0 whole-branch
 # review); this script is the thing CI runs, and the thing you can run

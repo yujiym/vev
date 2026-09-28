@@ -4,9 +4,9 @@ Guidance for AI coding agents working in this repository.
 
 ## Design reference
 
-[docs/system-design.md](docs/system-design.md) is the canonical design of vev. Before implementing a milestone (§18), read the sections it depends on, and record any question the design does not answer in §17 of that document rather than deciding it silently in code.
+[docs/spec.md](docs/spec.md) is the canonical design of vev. Before implementing a milestone (§18), read the sections it depends on, and record any question the design does not answer in §17 of that document rather than deciding it silently in code.
 
-The design describes software that does not exist yet: treat every section as intent, and the repository as the authority on what is built. Keep `docs/system-design.md` current when a decision changes the design — the root name `DESIGN.md` is reserved for design principles, so this document stays under `docs/`.
+It describes more than is built: M0 exists, everything past it is intent. The repository is the authority on what exists; the spec is the authority on what it should become. Keep `docs/spec.md` current when a decision changes the design — the root name `DESIGN.md` is reserved for design principles, so this document stays under `docs/`.
 
 Decisions that shaped the code live in [docs/adr/](docs/adr/README.md): read the relevant ADR before revisiting a toolchain, structure or dependency choice, and add a new ADR rather than editing a past one.
 

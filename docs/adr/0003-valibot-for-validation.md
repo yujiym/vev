@@ -4,11 +4,11 @@
 
 ## Context
 
-`docs/system-design.md` §4 originally named Zod for runtime input validation (request bodies, environment values, clip and track schemas). Both Zod and Valibot have equivalent Hono and Drizzle integrations available — `@hono/valibot-validator@0.6.1` and `drizzle-valibot@0.4.2`, both MIT-licensed — so the choice between them is not about a capability either library lacks.
+`docs/spec.md` §4 originally named Zod for runtime input validation (request bodies, environment values, clip and track schemas). Both Zod and Valibot have equivalent Hono and Drizzle integrations available — `@hono/valibot-validator@0.6.1` and `drizzle-valibot@0.4.2`, both MIT-licensed — so the choice between them is not about a capability either library lacks.
 
 ## Decision
 
-Valibot, with `import * as v from 'valibot'` as the house style throughout `packages/shared` and `apps/api`. §4 of `docs/system-design.md` was updated to name Valibot in place of Zod.
+Valibot, with `import * as v from 'valibot'` as the house style throughout `packages/shared` and `apps/api`. §4 of `docs/spec.md` was updated to name Valibot in place of Zod.
 
 ## Consequences
 

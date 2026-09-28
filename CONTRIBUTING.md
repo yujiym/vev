@@ -32,7 +32,7 @@ CI checks every commit in a pull request for this trailer and fails the build if
 
 ## License of contributions
 
-vev is licensed as a whole under **AGPL-3.0-or-later** (see §14.1 of [`docs/system-design.md`](docs/system-design.md)). This choice follows from bundling AGPL-3.0-licensed code (`hydra-synth`, and `textmode.synth.js` as its derivative) into the JavaScript served to browsers.
+vev is licensed as a whole under **AGPL-3.0-or-later** (see §14.1 of [`docs/spec.md`](docs/spec.md)). This choice follows from bundling AGPL-3.0-licensed code (`hydra-synth`, and `textmode.synth.js` as its derivative) into the JavaScript served to browsers.
 
 Every source file you add or substantially modify must carry the SPDX header appropriate to its language, as the first line of the file:
 
@@ -42,7 +42,7 @@ Every source file you add or substantially modify must carry the SPDX header app
 
 ## Dependency license policy
 
-Only dependencies whose licenses are compatible with AGPL-3.0 may be added (see §14.1 of `docs/system-design.md`). GPL-2.0-only and unknown licenses are never allowed; Apache-2.0, MIT, BSD, ISC, MPL-2.0, LGPL and GPL-3.0-family licenses are compatible.
+Only dependencies whose licenses are compatible with AGPL-3.0 may be added (see §14.1 of `docs/spec.md`). GPL-2.0-only and unknown licenses are never allowed; Apache-2.0, MIT, BSD, ISC, MPL-2.0, LGPL and GPL-3.0-family licenses are compatible.
 
 Run the license check whenever you add or upgrade a production dependency:
 
@@ -77,8 +77,8 @@ In practice this means: a type error inside a `<script>` block is caught; a type
 
 ## Clips are content, not code
 
-Clips (Hydra / textmode sketches and their metadata) are content and keep their own authors' licenses — they are not part of vev's codebase license. Per §14.2 of `docs/system-design.md`, the repository does **not** ship third-party clips. The only clips that may be included are the vev authors' own examples, under `examples/clips/`, each with its own per-file license header. Do not submit clips written by anyone else, even under a permissive license — they do not belong in this repository.
+Clips (Hydra / textmode sketches and their metadata) are content and keep their own authors' licenses — they are not part of vev's codebase license. Per §14.2 of `docs/spec.md`, the repository does **not** ship third-party clips. The only clips that may be included are the vev authors' own examples, under `examples/clips/`, each with its own per-file license header. Do not submit clips written by anyone else, even under a permissive license — they do not belong in this repository.
 
 ## Adding an engine or a decision provider
 
-If your contribution adds a new render engine or a new decision provider, read [`docs/system-design.md`](docs/system-design.md) first for the extension points and contracts each of those must satisfy.
+If your contribution adds a new render engine or a new decision provider, read [`docs/spec.md`](docs/spec.md) first for the extension points and contracts each of those must satisfy.

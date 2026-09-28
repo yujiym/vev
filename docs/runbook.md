@@ -2,7 +2,7 @@
 
 # Runbook
 
-How to run vev locally and what bites. The design lives in [system-design.md](./system-design.md); decisions live in [adr/](./adr/README.md). This file is only what someone needs to operate the repository, and every entry was established by running it.
+How to run vev locally and what bites. The design lives in [spec.md](./spec.md); decisions live in [adr/](./adr/README.md). This file is only what someone needs to operate the repository, and every entry was established by running it.
 
 ## Commands
 

@@ -1,6 +1,8 @@
-# vev — AI-assisted Live Visual Sequencer: Design Document
+# vev — AI-assisted Live Visual Sequencer
 
-Status: design of the planned MVP as of 2026-09-28. Nothing in this document is implemented yet, and items in §17 are unverified. It is the canonical design reference until the repository grows separate architecture and specification documents.
+The specification: what vev is, and how it is meant to work. It is the authority the code answers to, and the document every milestone is read against.
+
+Status as of 2026-09-28: M0 (§18) is built — the workspace, the Worker, the SPA and the gate. Everything beyond it is design, not description. §17 lists what is still unverified; the items M0 settled say so.
 
 ## 0. Overview
 
@@ -174,7 +176,7 @@ vev/
 ├ services/
 │  └ decision-server/ # Optional: scripts/docs for running Kev locally, cloudflared config
 ├ docs/
-│  └ system-design.md     # this document (the root name DESIGN.md is reserved for design principles)
+│  └ spec.md     # this document (the root name DESIGN.md is reserved for design principles)
 ├ AGENTS.md               # guidance for AI coding agents
 ├ LICENSE                 # AGPL-3.0 full text
 ├ THIRD_PARTY_NOTICES.md  # generated: dependency licenses and copyright notices
