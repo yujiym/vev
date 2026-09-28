@@ -6,7 +6,14 @@
   "compatibility_flags": ["nodejs_compat"],
   // The built SPA is served by this Worker: one deployed Worker, and the same
   // artifact runs at a venue (§3, §15.3). `run_worker_first` keeps /api/* from
-  // being swallowed by the SPA fallback.
+  // being swallowed by the SPA fallback. `pnpm live` builds `../web/build`
+  // first, so this directory always exists there. `pnpm dev` does NOT build it
+  // — it overrides this at the CLI with `--assets ./dev-assets` (verified: the
+  // flag replaces `directory` while `not_found_handling` and
+  // `run_worker_first` from this config still apply), so a clean clone with no
+  // build never fails to start, and 8787 during `pnpm dev` visibly says "this
+  // isn't the app" instead of silently serving a stale build. The real dev SPA
+  // is Vite's, on :5173 (see apps/web/vite.config.ts).
   "assets": {
     "directory": "../web/build",
     "not_found_handling": "single-page-application",

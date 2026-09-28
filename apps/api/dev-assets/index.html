@@ -1,0 +1,23 @@
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>vev — dev Worker</title>
+  </head>
+  <body>
+    <p>
+      This is the API Worker's dev-only placeholder (<code>apps/api/dev-assets</code>), served on
+      <code>:8787</code> during <code>pnpm dev</code>. It is not the app.
+    </p>
+    <p>
+      The SPA you want is Vite's dev server:
+      <a href="http://127.0.0.1:5173">http://127.0.0.1:5173</a> (started by the same <code>pnpm dev</code>,
+      and it proxies <code>/api</code> to this Worker).
+    </p>
+    <p>
+      <code>pnpm live</code> serves the real built SPA from this Worker instead — see
+      <code>apps/api/wrangler.jsonc</code>'s <code>assets.directory</code>.
+    </p>
+  </body>
+</html>
