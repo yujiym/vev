@@ -2,7 +2,15 @@
 import type { ClipSummary } from '@vev/shared'
 import { describe, expect, it } from 'vitest'
 
-import { clipFlags, collectTags, fetchLibrary, filterClips, libraryQuery, thumbnailUrl } from './library.ts'
+import {
+  clipFlags,
+  collectTags,
+  fetchClip,
+  fetchLibrary,
+  filterClips,
+  libraryQuery,
+  thumbnailUrl,
+} from './library.ts'
 
 const summary = (overrides: Partial<ClipSummary> = {}): ClipSummary => ({
   annotationStatus: 'ok',
@@ -146,5 +154,24 @@ describe(fetchLibrary, () => {
 
   it('throws with the route’s own message when a filter value is refused', async () => {
     await expect(fetchLibrary({}, refusingFetch)).rejects.toThrow('engine must be one of')
+  })
+})
+
+/** Hoisted for the same reason as `refusingFetch` above: they capture nothing. */
+const missingClipFetch: typeof fetch = async () =>
+  await Promise.resolve(new Response('Not Found', { status: 404 }))
+
+const bodylessFailureFetch: typeof fetch = async () =>
+  await Promise.resolve(new Response('', { status: 503 }))
+
+describe(fetchClip, () => {
+  it('throws the route’s own message, the way fetchLibrary beside it does', async () => {
+    await expect(fetchClip('missing', missingClipFetch)).rejects.toThrow('Not Found')
+  })
+
+  it('falls back to the endpoint and status when the route sent no message body', async () => {
+    await expect(fetchClip('missing', bodylessFailureFetch)).rejects.toThrow(
+      '/api/clips/missing failed with 503',
+    )
   })
 })

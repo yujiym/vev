@@ -95,9 +95,13 @@ export const fetchLibrary = async (
  * before it can play one — see `fetchTrackClips` in `$lib/track-editor.ts`.
  */
 export const fetchClip = async (id: string, fetchImpl: typeof fetch = fetch): Promise<Clip> => {
-  const response = await fetchImpl(`${CLIPS_ENDPOINT}/${id}`)
+  const endpoint = `${CLIPS_ENDPOINT}/${id}`
+  const response = await fetchImpl(endpoint)
   if (!response.ok) {
-    throw new Error(`GET ${CLIPS_ENDPOINT}/${id} failed with ${response.status}`)
+    // The route's own text, exactly as `fetchLibrary` above does with it — a status code alone
+    // tells the panel's user nothing about which clip a track could not load.
+    const detail = await response.text().catch(() => '')
+    throw new Error(detail === '' ? `GET ${endpoint} failed with ${response.status}` : detail)
   }
 
   return v.parse(clipSchema, await response.json())

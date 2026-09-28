@@ -152,6 +152,15 @@ const jsonResponse = (body: unknown, ok = true, status = ok ? 200 : 500): Respon
     json: async () => await Promise.resolve(body),
     ok,
     status,
+    text: async () => await Promise.resolve(''),
+  }) as unknown as Response
+
+/** A refusal shaped the way the routes actually answer one: `c.text(message, status)`. */
+const textResponse = (detail: string, status: number): Response =>
+  ({
+    ok: false,
+    status,
+    text: async () => await Promise.resolve(detail),
   }) as unknown as Response
 
 describe(submitClip, () => {
@@ -183,10 +192,20 @@ describe(submitClip, () => {
     expect(fetchImpl).toHaveBeenCalledWith('/api/clips', expect.objectContaining({ method: 'POST' }))
   })
 
-  it('throws with the status when the server rejects the request', async () => {
+  it('falls back to the status when the server sent no message body', async () => {
     const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({}, false, 400))
 
     await expect(submitClip(buildNewClip(minimalForm()), fetchImpl)).rejects.toThrow('400')
+  })
+
+  it("throws the route's own message, not a bare status — that text is the whole of what the registrant can act on", async () => {
+    const fetchImpl = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(textResponse('Slug "hydra/taken" is already taken by another clip.', 409))
+
+    await expect(submitClip(buildNewClip(minimalForm()), fetchImpl)).rejects.toThrow(
+      'Slug "hydra/taken" is already taken by another clip.',
+    )
   })
 })
 
@@ -233,10 +252,21 @@ describe(submitThumbnail, () => {
     expect(fetchImpl).toHaveBeenCalledWith('/api/clips/some-id/thumbnail', expect.anything())
   })
 
-  it('throws with the status when the upload fails', async () => {
+  it('throws with the status when the upload fails and the server sent no message body', async () => {
     const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({}, false, 404))
     const blob = new Blob(['x'], { type: 'video/webm' })
 
     await expect(submitThumbnail('missing-id', blob, [], fetchImpl)).rejects.toThrow('404')
+  })
+
+  it("throws the route's own message when it sent one", async () => {
+    const fetchImpl = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(textResponse('palette entries must be non-empty strings', 400))
+    const blob = new Blob(['x'], { type: 'video/webm' })
+
+    await expect(submitThumbnail('some-id', blob, ['#zzz'], fetchImpl)).rejects.toThrow(
+      'palette entries must be non-empty strings',
+    )
   })
 })
