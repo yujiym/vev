@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@vev/engines": "workspace:*",
+    "@vev/ingest": "workspace:*",
     "@vev/shared": "workspace:*",
     "hydra-synth": "1.4.0",
     "valibot": "^1.5.0"

@@ -78,6 +78,9 @@ importers:
       '@vev/engines':
         specifier: workspace:*
         version: link:../../packages/engines
+      '@vev/ingest':
+        specifier: workspace:*
+        version: link:../../packages/ingest
       '@vev/shared':
         specifier: workspace:*
         version: link:../../packages/shared

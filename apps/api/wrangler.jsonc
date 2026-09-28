@@ -14,10 +14,15 @@
   // build never fails to start, and 8787 during `pnpm dev` visibly says "this
   // isn't the app" instead of silently serving a stale build. The real dev SPA
   // is Vite's, on :5173 (see apps/web/vite.config.ts).
+  //
+  // `/media/*` (Task 4, `src/routes/media.ts`) needs the same treatment: it is
+  // the Worker's own route, not a static asset, and with no matching file
+  // under `../web/build` the SPA fallback would otherwise swallow it and
+  // return `index.html` instead of a thumbnail (or a real 404).
   "assets": {
     "directory": "../web/build",
     "not_found_handling": "single-page-application",
-    "run_worker_first": ["/api/*"],
+    "run_worker_first": ["/api/*", "/media/*"],
   },
   // SOURCE_URL is the AGPL §13 source offer (§14.1). ACCESS_TEAM_DOMAIN and
   // ACCESS_AUD back the §13 Access-assertion presence check (see src/access.ts).
