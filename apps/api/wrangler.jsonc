@@ -59,5 +59,32 @@
         },
       ],
     },
+    // `--env preview` is the Cloudflare preview URL (M1 task 6). Ongoing
+    // deploys use `versions upload`, not `deploy`, so each one gets its own
+    // version URL without promoting to the environment's live traffic (see
+    // the runbook's bootstrap gotcha for the one-time exception). It points
+    // at its OWN D1 database (`vev-preview`), never at `vev` (production,
+    // reserved for M12) — a preview must never be able to touch production
+    // data. Same inheritance rule as `env.local`: `assets` is inherited from
+    // the top level and intentionally omitted here; `vars` and
+    // `d1_databases` are not inherited and must be repeated.
+    "preview": {
+      "vars": {
+        // Overwritten at deploy time by `deploy:preview` with the real short
+        // commit (`git rev-parse --short HEAD`), so the footer and
+        // `/api/health` agree. `dev` here is only the config-file default.
+        "GIT_COMMIT": "dev",
+        "SOURCE_URL": "https://github.com/yujiym/vev",
+        "VEV_MODE": "cloud",
+      },
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "vev-preview",
+          "database_id": "bcee626b-7dbd-4456-8fb9-a708583e6e1d",
+          "migrations_dir": "migrations",
+        },
+      ],
+    },
   },
 }

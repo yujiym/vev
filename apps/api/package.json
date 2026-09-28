@@ -8,10 +8,12 @@
     "dev": "wrangler d1 migrations apply vev --local && wrangler dev --env local --ip 127.0.0.1 --port 8787 --assets ./dev-assets",
     "live": "wrangler d1 migrations apply vev --local && wrangler dev --env local --ip 127.0.0.1 --port 8787",
     "deploy": "wrangler deploy",
+    "deploy:preview": "wrangler versions upload --env preview --var GIT_COMMIT:$(git rev-parse --short HEAD)",
     "test": "vp test",
     "db:generate": "drizzle-kit generate",
     "migrate:local": "wrangler d1 migrations apply vev --local",
-    "migrate:remote": "wrangler d1 migrations apply vev --remote"
+    "migrate:remote": "wrangler d1 migrations apply vev --remote",
+    "migrate:preview": "wrangler d1 migrations apply vev-preview --env preview --remote"
   },
   "dependencies": {
     "@vev/shared": "workspace:*",
