@@ -2,3 +2,13 @@
 .worktrees/
 # Subagent-driven development workspace (ledgers, briefs, reports, review packages)
 .superpowers/sdd/
+node_modules/
+.svelte-kit/
+build/
+dist/
+.wrangler/
+.dev.vars
+.env
+.env.*
+!.env.example
+*.log

@@ -1,0 +1,32 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+packages:
+  - apps/*
+  - packages/*
+# pnpm 11 reads settings from this file, not .npmrc.
+engineStrict: true
+autoInstallPeers: false
+# Node is provisioned by pnpm itself via package.json devEngines.runtime
+# (onFail: download); no .node-version / version manager needed.
+allowBuilds:
+  esbuild: true
+  workerd: true
+# vite-plus pins oxlint/oxfmt exactly; ultracite floats. Without these overrides
+# two oxlint copies get installed and the ultracite presets' OxlintConfig type no
+# longer matches vite-plus's defineConfig (TS2769 in vite.config.ts). The pinned
+# versions are vite-plus@0.3.3's own dependency pins — bump all three together.
+#
+# vite-plus-core is a fork of vite: a third-party Vite plugin (e.g.
+# @sveltejs/vite-plugin-svelte) that declares a `vite` peer otherwise resolves the
+# real `vite` package, splitting the graph into two structurally similar but
+# nominally distinct Plugin/UserConfig types. Redirecting the peer to the same
+# vite-plus-core release unifies the types.
+overrides:
+  oxlint: '=1.83.0'
+  oxfmt: '=0.68.0'
+  vite@*: npm:@voidzero-dev/vite-plus-core@0.3.3
+minimumReleaseAge: 4320
+minimumReleaseAgeExclude:
+  # ultracite@7.12.1 is the version pinned in the Task 1 brief (^7.12.1); it was
+  # published within the minimumReleaseAge window at install time, so it must be
+  # excluded explicitly rather than lowering the global cutoff.
+  - ultracite@7.12.1

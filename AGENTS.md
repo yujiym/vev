@@ -8,9 +8,18 @@ Guidance for AI coding agents working in this repository.
 
 The design describes software that does not exist yet: treat every section as intent, and the repository as the authority on what is built. Keep `docs/system-design.md` current when a decision changes the design — the root name `DESIGN.md` is reserved for design principles, so this document stays under `docs/`.
 
+## Toolchain
+
+Vite+ (`vp`) drives tests, lint (oxlint) and format (oxfmt) from the root `vite.config.ts`, which holds the whole lint and fmt policy; read its header before changing a rule. Package-level `vite.config.ts` files configure that package's dev server, build and test environment.
+
+- Entry points: `pnpm check` (typecheck + lint + fmt), `pnpm test`, `pnpm dev` (development, two processes), `pnpm live` (the built SPA served by the local Worker — how vev runs at a venue, §15.3).
+- Install with `pnpm install --frozen-lockfile`; pnpm provisions Node itself.
+- Keep lint strict. Suppress a rule only at the narrowest applicable line, with the reason: `// oxlint-disable-next-line <rule> -- <why>`.
+- `vite-plus`, `oxlint`, `oxfmt` and the `vite@*` override in `pnpm-workspace.yaml` move together; that file's comments say why.
+
 ## Repository status
 
-The repository holds documentation only. There is no package manifest, build, or test command yet; M0 in §18 creates them. Add a Toolchain section here when it does, describing the commands that actually exist.
+The pnpm workspace and Vite+ toolchain exist (M0 in §18); the `apps/*` and `packages/*` workspaces they target do not yet.
 
 The layout planned in §4.1 (`apps/web`, `apps/api`, `packages/{shared,engines,ingest,decision}`, `services/decision-server`) is a target, not a scaffold to assume.
 

@@ -1,0 +1,39 @@
+{
+  "name": "vev",
+  "version": "0.0.0",
+  "private": true,
+  "license": "AGPL-3.0-or-later",
+  "type": "module",
+  "scripts": {
+    "dev": "pnpm --parallel --filter api --filter web run dev",
+    "build": "pnpm --filter web run build",
+    "live": "pnpm --filter web run build && pnpm --filter api run live",
+    "lint": "vp lint",
+    "lint:fix": "vp lint --fix",
+    "format": "vp fmt",
+    "format:check": "vp fmt --check",
+    "check": "vp check",
+    "typecheck": "vp check --no-fmt --no-lint",
+    "test": "vp run --filter './apps/*' --filter './packages/*' test",
+    "licenses:check": "node scripts/check-licenses.mjs",
+    "migrate:local": "pnpm --filter api run migrate:local"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "~7.0.2",
+    "ultracite": "^7.12.1",
+    "vite-plus": "0.3.3"
+  },
+  "devEngines": {
+    "runtime": {
+      "name": "node",
+      "version": "24.18.0",
+      "onFail": "download"
+    }
+  },
+  "engines": {
+    "node": "24.18.0",
+    "pnpm": ">=11.12.0 <12"
+  },
+  "packageManager": "pnpm@11.20.0"
+}
