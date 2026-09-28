@@ -11,6 +11,7 @@ import type { Env } from './env.ts'
 import { ingestQueue } from './ingest/consume.ts'
 import { clipsRoutes } from './routes/clips.ts'
 import { clipThumbnailRoutes, mediaRoutes } from './routes/media.ts'
+import { tracksRoutes } from './routes/tracks.ts'
 
 const api = new Hono<{ Bindings: Env }>().basePath('/api')
 
@@ -35,9 +36,15 @@ const routes = api.get('/health', async (c) => {
   )
 })
 
-const withClips = routes.route('/clips', clipsRoutes).route('/clips', clipThumbnailRoutes)
+// Every owner route is chained onto the same const, so it is covered by the
+// `requireAccessAssertion` mounted above (see that middleware's doc comment on
+// why coverage is by explicit skip set rather than by registration order).
+const withLibrary = routes
+  .route('/clips', clipsRoutes)
+  .route('/clips', clipThumbnailRoutes)
+  .route('/tracks', tracksRoutes)
 
-export type AppType = typeof withClips
+export type AppType = typeof withLibrary
 
 /**
  * `/media/*` is mounted on the top-level app, alongside `/api`, not inside it — `GET /media/:key`
