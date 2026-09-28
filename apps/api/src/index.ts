@@ -16,7 +16,7 @@ const routes = app.get('/health', async (c) => {
 
   return c.json(
     v.parse(healthResponseSchema, {
-      commit: 'dev',
+      commit: c.env.GIT_COMMIT,
       mode: c.env.VEV_MODE,
       ok: true,
       settingsRows: row?.value ?? 0,

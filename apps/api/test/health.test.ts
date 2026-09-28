@@ -31,4 +31,10 @@ describe('GET /api/health', () => {
     const parsed = v.parse(healthResponseSchema, await after.json())
     expect(parsed.settingsRows).toBe(baseline.settingsRows + 1)
   })
+
+  it('reports the commit from the environment', async () => {
+    const response = await SELF.fetch('https://vev.test/api/health')
+    const parsed = v.parse(healthResponseSchema, await response.json())
+    expect(parsed.commit).toBe(env.GIT_COMMIT)
+  })
 })

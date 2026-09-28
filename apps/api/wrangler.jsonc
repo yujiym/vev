@@ -4,9 +4,18 @@
   "main": "src/index.ts",
   "compatibility_date": "2026-09-01",
   "compatibility_flags": ["nodejs_compat"],
+  // The built SPA is served by this Worker: one deployed Worker, and the same
+  // artifact runs at a venue (§3, §15.3). `run_worker_first` keeps /api/* from
+  // being swallowed by the SPA fallback.
+  "assets": {
+    "directory": "../web/build",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"],
+  },
   // SOURCE_URL is the AGPL §13 source offer (§14.1). A self-hoster who modifies
   // vev points this at their own fork.
   "vars": {
+    "GIT_COMMIT": "dev",
     "SOURCE_URL": "https://github.com/oboroxyz/vev",
     "VEV_MODE": "cloud",
   },
@@ -23,7 +32,16 @@
     // `--env local` is local mode (§15.3) and never deploys: it takes no routes
     // and no custom domain.
     "local": {
+      // Wrangler's named environments do not inherit `assets` or `vars` from
+      // the top level (Task 4 hit the same for `d1_databases`), so both are
+      // repeated here.
+      "assets": {
+        "directory": "../web/build",
+        "not_found_handling": "single-page-application",
+        "run_worker_first": ["/api/*"],
+      },
       "vars": {
+        "GIT_COMMIT": "dev",
         "SOURCE_URL": "https://github.com/oboroxyz/vev",
         "VEV_MODE": "local",
       },

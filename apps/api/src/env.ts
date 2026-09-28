@@ -11,6 +11,8 @@ import type { VevMode } from '@vev/shared'
  */
 export interface Env {
   DB: D1Database
+  /** Short git commit of the running build, injected at build time (§14.1). */
+  GIT_COMMIT: string
   SOURCE_URL: string
   VEV_MODE: VevMode
   SETTINGS_ENCRYPTION_KEY?: string
