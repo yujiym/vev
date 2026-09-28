@@ -58,9 +58,16 @@ export const isSentinelFill = (pixels: Uint8Array): boolean => {
  * before the clip has run at all; `after` is the same buffer sampled once the clip has been
  * loaded, switched in, and ticked. A clip that wrote anything to its own buffer — a bright
  * kaleidoscope, a flat white fill, a flat BLACK fill, a dark blue gradient, anything — overwrites
- * the sentinel and differs; a clip that rendered nothing to its own buffer (including one whose
- * code targets a different output entirely, e.g. `.out(o3)` instead of its assigned slot) leaves
- * the sentinel exactly as it was and fails.
+ * the sentinel and differs; a clip that rendered nothing to its own buffer leaves the sentinel
+ * exactly as it was and fails. That is a clip whose chain produces no image at all: an `.out(`
+ * call reached by nothing, a source that never initialises, a shader that clears and stops.
+ *
+ * It is NOT a clip that names another buffer. An earlier version of this comment offered
+ * `.out(o3)` as the example, which `rewriteOut` (`rewrite.ts`) has since made impossible: a
+ * clip's single `.out(...)` call, whatever it names, is rewritten to the slot's own buffer before
+ * `load` ever sees it, and a clip with two or more is refused by `probeClip` before anything is
+ * mounted. By the time `framesDiffer` is asked anything, the clip can only be writing its own
+ * buffer or writing nothing.
  *
  * Sampling each slot's OWN buffer, not the composed canvas, is what makes this decidable at all.
  * An earlier version of this gate sampled the canvas instead, compared against a baseline taken
