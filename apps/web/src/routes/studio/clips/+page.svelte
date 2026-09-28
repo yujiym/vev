@@ -15,7 +15,6 @@
 
   let engine = $state<EngineKind | ''>('')
   let tag = $state('')
-  let reviewedChoice = $state<'' | 'false' | 'true'>('')
   let energy = $state<ClipEnergy | 0>(0)
   let licence = $state<LicenceFilter>('any')
 
@@ -28,7 +27,12 @@
     energy: energy === 0 ? undefined : energy,
     engine: engine === '' ? undefined : engine,
     licence,
-    reviewed: reviewedChoice === '' ? undefined : reviewedChoice === 'true',
+    // No `reviewed` here on purpose. Nothing writes that column in M2 — annotation does not, no
+    // route sets it, and neither registration schema carries it — so `?reviewed=true` could only
+    // ever return zero rows. A control that cannot succeed teaches a person that reviewed clips
+    // are absent, rather than that review does not exist yet. The column, its index, the route's
+    // `?reviewed=` parameter and `libraryQuery`'s support for it all stay: M3's review queue is
+    // what will give them a writer, and it is the control alone that is premature.
     tag: tag === '' ? undefined : tag,
   })
 
@@ -100,15 +104,6 @@
         <option value="any">any</option>
         <option value="commercial-ok">cleared for commercial use</option>
         <option value="unknown">licence unknown</option>
-      </select>
-    </label>
-
-    <label>
-      Reviewed
-      <select bind:value={reviewedChoice}>
-        <option value="">any</option>
-        <option value="true">reviewed</option>
-        <option value="false">unreviewed</option>
       </select>
     </label>
 
