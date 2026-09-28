@@ -34,16 +34,29 @@ export type ProbeFailureReason =
 export type ProbeResult =
   | { readonly maxFrameMs: number; readonly ok: true }
   | {
+      /** The raw thrown value, where one was thrown. Kept so a caller that wants more than `message` has it; `message` already carries its text. */
       readonly error?: unknown
       readonly maxFrameMs?: number
-      // Set only where the reason is something the author can act on by editing the clip in a
-      // specific way, as opposed to a diagnosis (`black-frame`, `budget-exceeded`) — currently
-      // just `multi-output`. Callers that show a failure should prefer this over the bare
-      // `reason` when it's present.
-      readonly message?: string
+      /**
+       * A sentence for the registrant, set for EVERY reason — this is what a screen shows.
+       *
+       * It used to be set only for `multi-output`, on the reasoning that the rest are
+       * "diagnoses" rather than things the author can act on. That reasoning never considered
+       * `compile-error`, which is the most actionable refusal of the five: a syntax error the
+       * author fixes in one edit, whose text this result was already holding in `error` and
+       * throwing away. Rendering `reason` instead put "Probe failed: compile-error" on screen
+       * while the actual error sat unread in the same object. A diagnosis is also worth saying
+       * in words — and `budget-exceeded` knows the measured frame time and the budget it missed,
+       * which is a number, not a verdict.
+       */
+      readonly message: string
       readonly ok: false
       readonly reason: ProbeFailureReason
     }
+
+/** The text of a thrown value, for a message a person reads. An `Error`'s own message; anything else stringified, since a clip's code may throw whatever it likes. */
+// oxlint-disable-next-line anti-slop/no-unknown-parameters -- a caught value IS `unknown` in TypeScript and this function is the boundary that narrows it; there is no schema to run on "whatever a clip threw"
+const errorText = (error: unknown): string => (error instanceof Error ? error.message : String(error))
 
 /**
  * Runs a clip through the ordinary render path and reports whether it clears spec §11.2's gate:
@@ -103,26 +116,48 @@ const runProbe = (code: string, canvas: HTMLCanvasElement): ProbeResult => {
     sentinel = compositor.readSlotPixels(PROBE_SLOT)
   } catch (error) {
     compositor.dispose()
-    return { error, ok: false, reason: 'render-error' }
+    return {
+      error,
+      message: `The probe could not paint its reference frame, so nothing about this clip was tested: ${errorText(error)}. That is this browser's WebGL failing, not your clip — try again, or try another browser.`,
+      ok: false,
+      reason: 'render-error',
+    }
   }
 
   if (!isSentinelFill(sentinel)) {
     compositor.dispose()
-    return { ok: false, reason: 'render-error' }
+    return {
+      message:
+        'The probe painted its reference frame and read something else back, so nothing about ' +
+        "this clip was tested. That is this browser's WebGL failing, not your clip — try again, " +
+        'or try another browser.',
+      ok: false,
+      reason: 'render-error',
+    }
   }
 
   try {
     compositor.load(PROBE_SLOT, code)
   } catch (error) {
     compositor.dispose()
-    return { error, ok: false, reason: 'compile-error' }
+    return {
+      error,
+      message: `This clip did not compile: ${errorText(error)}`,
+      ok: false,
+      reason: 'compile-error',
+    }
   }
 
   try {
     compositor.switchTo(PROBE_SLOT, { bars: 0, kind: 'cut' }, Date.now())
   } catch (error) {
     compositor.dispose()
-    return { error, ok: false, reason: 'render-error' }
+    return {
+      error,
+      message: `This clip compiled, but threw when it was brought in: ${errorText(error)}`,
+      ok: false,
+      reason: 'render-error',
+    }
   }
 
   let maxFrameMs = 0
@@ -140,12 +175,22 @@ const runProbe = (code: string, canvas: HTMLCanvasElement): ProbeResult => {
     }
   } catch (error) {
     compositor.dispose()
-    return { error, ok: false, reason: 'render-error' }
+    return {
+      error,
+      message: `This clip threw while rendering: ${errorText(error)}`,
+      ok: false,
+      reason: 'render-error',
+    }
   }
 
   if (maxFrameMs > FRAME_BUDGET_MS) {
     compositor.dispose()
-    return { maxFrameMs, ok: false, reason: 'budget-exceeded' }
+    return {
+      maxFrameMs,
+      message: `This clip's slowest probed frame took ${maxFrameMs.toFixed(1)}ms, over the ${FRAME_BUDGET_MS}ms budget. Simplify the chain — fewer passes, less modulation, a smaller kaleid — and probe again.`,
+      ok: false,
+      reason: 'budget-exceeded',
+    }
   }
 
   let after: Uint8Array
@@ -153,13 +198,26 @@ const runProbe = (code: string, canvas: HTMLCanvasElement): ProbeResult => {
     after = compositor.readSlotPixels(PROBE_SLOT)
   } catch (error) {
     compositor.dispose()
-    return { error, ok: false, reason: 'render-error' }
+    return {
+      error,
+      message: `The probe could not read this clip's buffer back: ${errorText(error)}. That is this browser's WebGL failing, not your clip — try again, or try another browser.`,
+      ok: false,
+      reason: 'render-error',
+    }
   }
 
   compositor.dispose()
 
   if (!framesDiffer(sentinel, after)) {
-    return { maxFrameMs, ok: false, reason: 'black-frame' }
+    return {
+      maxFrameMs,
+      message:
+        'This clip ran without error but wrote nothing to its buffer, so it would render ' +
+        'nothing on stage. Check that the chain ends in an .out( call and that it actually ' +
+        'produces an image.',
+      ok: false,
+      reason: 'black-frame',
+    }
   }
 
   return { maxFrameMs, ok: true }

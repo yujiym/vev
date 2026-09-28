@@ -9,6 +9,13 @@ import type { ProbeResult } from './probe.ts'
  * calls the test intends.
  */
 const MARKERS = {
+  /**
+   * The probe's own sentinel fill reads back as something else — a WebGL/environment fault, not a
+   * fact about the clip. This one is a property on the CANVAS, not a marker in the code: the
+   * sentinel is filled and confirmed before `probeClip` ever hands the fake the clip's code, so
+   * the canvas the caller passes to `mount` is the only channel that exists that early.
+   */
+  breaksTheSentinel: 'fakeBreaksTheSentinel',
   /** The slowest probed frame costs this many real milliseconds. A LITERAL number belongs at each call site, never `FRAME_BUDGET_MS + n`: a test written relative to the constant follows the constant when it is mutated, and then proves nothing about the gate. */
   costsMs: /\/\* fake: costs (?<ms>\d+)ms \*\//u,
   /** The clip loads and runs but never writes its own buffer. */
@@ -49,14 +56,17 @@ vi.mock('./compositor.ts', async () => {
     Uint8Array.from([...SENTINEL_RGB.map((fraction) => Math.round(fraction * 255)), 255])
 
   class FakeCompositor {
+    private breaksTheSentinel = false
     private costMs = 0
     private readonly pixelsBySlot = new Map<string, Uint8Array>()
     private throwsOnSwitch = false
 
     // Stands in for `HydraCompositor.mount`, whose only job is to create the real WebGL context
-    // this fake has no need for.
-    // oxlint-disable-next-line eslint/class-methods-use-this -- fake implements HydraCompositor's instance-method interface; this member is intentionally a no-op
-    mount(): void {}
+    // this fake has no need for — except as the one channel that exists before any clip code does
+    // (see `MARKERS.breaksTheSentinel`).
+    mount(canvas: HTMLCanvasElement): void {
+      this.breaksTheSentinel = 'fakeBreaksTheSentinel' in canvas
+    }
 
     load(slot: 'a' | 'b', code: string): void {
       if (code.includes(MARKERS.throwsOnLoad)) {
@@ -77,9 +87,13 @@ vi.mock('./compositor.ts', async () => {
       const rewritten = rewriteOut(code, slot)
       const ownBuffer = slot === 'a' ? 'o1' : 'o2'
       if (new RegExp(`\\.out\\(\\s*${ownBuffer}\\s*\\)`, 'u').test(rewritten)) {
+        const painted =
+          code === SENTINEL_CODE && this.breaksTheSentinel
+            ? Uint8Array.from([0, 0, 0, 255])
+            : Uint8Array.from([10, 20, 30, 255])
         this.pixelsBySlot.set(
           slot,
-          code === SENTINEL_CODE ? sentinelPixels() : Uint8Array.from([10, 20, 30, 255]),
+          code === SENTINEL_CODE && !this.breaksTheSentinel ? sentinelPixels() : painted,
         )
       }
     }
@@ -176,7 +190,9 @@ describe(probeClip, () => {
 
     const result = await probeClip(`osc(10)${MARKERS.rendersNothing}`, canvas)
 
-    expect(asFailure(result).reason).toBe('black-frame')
+    const failure = asFailure(result)
+    expect(failure.reason).toBe('black-frame')
+    expect(failure.message).toMatch(/wrote nothing/u)
   })
 
   it('passes a clip that DOES write its own buffer, so the black-frame gate is not simply "refuse everything"', async () => {
@@ -197,6 +213,8 @@ describe(probeClip, () => {
     const failure = asFailure(result)
     expect(failure.reason).toBe('budget-exceeded')
     expect(failure.maxFrameMs).toBeGreaterThan(50)
+    // The measured number reaches the screen, not just the verdict.
+    expect(failure.message).toMatch(/\d+\.\dms, over the 50ms budget/u)
   })
 
   it('reports compile-error, and keeps the JavaScript error the clip threw', async () => {
@@ -207,6 +225,9 @@ describe(probeClip, () => {
     const failure = asFailure(result)
     expect(failure.reason).toBe('compile-error')
     expect(failure.error).toBeInstanceOf(SyntaxError)
+    // The most actionable refusal of the five: the author can fix a syntax error if told what it
+    // is, and the registration page shows `message`.
+    expect(failure.message).toContain("Unexpected token ')'")
   })
 
   it('reports render-error when the clip compiles but blows up on the way in', async () => {
@@ -214,6 +235,19 @@ describe(probeClip, () => {
 
     const result = await probeClip(`osc(10)${MARKERS.throwsOnSwitch}`, canvas)
 
-    expect(asFailure(result).reason).toBe('render-error')
+    const failure = asFailure(result)
+    expect(failure.reason).toBe('render-error')
+    expect(failure.message).toContain('regl: cannot read property of undefined')
+  })
+
+  it('says the reference frame failed, not the clip, when the probe itself could not paint', async () => {
+    const canvas = { [MARKERS.breaksTheSentinel]: true } as unknown as HTMLCanvasElement
+
+    // The sentinel fill is the probe's own setup, so a failure there says nothing about the clip.
+    const result = await probeClip('solid(1, 1, 1)', canvas)
+
+    const failure = asFailure(result)
+    expect(failure.reason).toBe('render-error')
+    expect(failure.message).toMatch(/nothing about this clip was tested/u)
   })
 })

@@ -156,7 +156,11 @@
       {#if probeResult.ok}
         <p role="status">Probe passed — max frame time {probeResult.maxFrameMs.toFixed(1)}ms.</p>
       {:else}
-        <p role="alert">Probe failed: {probeResult.message ?? probeResult.reason}</p>
+        <!-- `message` is set for every refusal (see `ProbeResult` in `@vev/engines/hydra`): the
+             compile error's own text, the measured frame time against the budget, and whether a
+             render-error was the clip's fault or this browser's. The bare `reason` slug was what
+             a registrant used to be shown instead. -->
+        <p role="alert">Probe failed: {probeResult.message}</p>
       {/if}
     {/if}
   </section>
