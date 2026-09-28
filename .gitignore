@@ -16,4 +16,6 @@ dist/
 # SOURCE_URL/commit, §14.1) rather than credentials, so it is tracked like any
 # other source file, unlike apps/api's .dev.vars.
 !apps/web/.env
+# Local verification captures: screenshots and recordings, never committed
+artifacts/
 *.log

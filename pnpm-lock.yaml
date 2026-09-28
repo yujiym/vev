@@ -92,6 +92,16 @@ importers:
         specifier: 4.1.11
         version: 4.1.11(@types/node@24.13.6)(@vitest/browser-preview@4.1.11)(esbuild@0.28.1)(tsx@4.23.15)(typescript@7.0.2)(yaml@2.9.1)
 
+  packages/engines:
+    dependencies:
+      '@vev/shared':
+        specifier: workspace:*
+        version: link:../shared
+    devDependencies:
+      vitest:
+        specifier: 4.1.11
+        version: 4.1.11(@types/node@24.13.6)(@vitest/browser-preview@4.1.11)(esbuild@0.28.1)(tsx@4.23.15)(typescript@7.0.2)(yaml@2.9.1)
+
   packages/shared:
     dependencies:
       valibot:
