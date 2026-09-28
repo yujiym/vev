@@ -210,6 +210,130 @@ describe(createControl, () => {
     expect(control.getSnapshot().next).toBeUndefined()
   })
 
+  it('Go mid-fade changes nothing and publishes nothing', () => {
+    const clockNow = createFakeNow(0)
+    const messages: OutputMessage[] = []
+    const control = createControl(
+      (message) => {
+        messages.push(message)
+      },
+      { now: clockNow.now, startClipId: 'quiet' },
+    )
+
+    control.setTransitionKind('crossfade')
+    control.queue('loud')
+    control.go()
+    // Land on the armed bar (2000) so the fade begins.
+    clockNow.set(2000)
+    control.tick()
+    expect(control.getSnapshot().fading).toBe(true)
+
+    const { barPhase: _barPhase, ...before } = control.getSnapshot()
+    messages.length = 0
+    clockNow.set(2500)
+    control.go()
+
+    const { barPhase: _barPhaseAfter, ...after } = control.getSnapshot()
+    expect(messages).toStrictEqual([])
+    expect(after).toStrictEqual(before)
+  })
+
+  it('toggling the transition kind mid-fade neither alters the running fade nor completes it early', () => {
+    const clockNow = createFakeNow(0)
+    const messages: OutputMessage[] = []
+    const control = createControl(
+      (message) => {
+        messages.push(message)
+      },
+      { now: clockNow.now, startClipId: 'quiet' },
+    )
+
+    control.setTransitionKind('crossfade')
+    control.queue('loud')
+    control.go()
+    // Land on the armed bar (2000) so the fade begins.
+    clockNow.set(2000)
+    control.tick()
+    expect(control.getSnapshot().fading).toBe(true)
+
+    messages.length = 0
+    control.setTransitionKind('cut')
+
+    expect(messages).toStrictEqual([])
+    expect(control.getSnapshot().transitionKind).toBe('crossfade')
+
+    // A `cut` transition's `bars` is 0 — if the toggle had taken effect, the
+    // fade would already be done on the next tick. Confirm it is not.
+    clockNow.set(2500)
+    control.tick()
+    expect(control.getSnapshot().current.clipId).toBe('quiet')
+    expect(control.getSnapshot().fading).toBe(true)
+  })
+
+  it('queueing mid-fade publishes no load and does not change what the fade is blending into', () => {
+    const clockNow = createFakeNow(0)
+    const messages: OutputMessage[] = []
+    const control = createControl(
+      (message) => {
+        messages.push(message)
+      },
+      { now: clockNow.now, startClipId: 'quiet' },
+    )
+
+    control.setTransitionKind('crossfade')
+    control.queue('loud')
+    control.go()
+    // Land on the armed bar (2000) so the fade begins.
+    clockNow.set(2000)
+    control.tick()
+    expect(control.getSnapshot().fading).toBe(true)
+    expect(control.getSnapshot().next?.clipId).toBe('loud')
+
+    messages.length = 0
+    // Only 'quiet' and 'loud' exist as fixtures; re-queueing 'quiet' (the
+    // clip currently playing) into the fade's destination slot is still a
+    // distinct value from 'loud' and so still exercises the guard —
+    // `fixtureById` would otherwise skip an unknown id before `reduce` is
+    // ever reached, deciding nothing about the mid-fade behaviour at all.
+    control.queue('quiet')
+
+    expect(messages).toStrictEqual([])
+    expect(control.getSnapshot().next?.clipId).toBe('loud')
+  })
+
+  it('hello mid-fade re-sends the transition the fade actually started with, even after a refused toggle attempt', () => {
+    const clockNow = createFakeNow(0)
+    const messages: OutputMessage[] = []
+    const control = createControl(
+      (message) => {
+        messages.push(message)
+      },
+      { now: clockNow.now, startClipId: 'quiet' },
+    )
+
+    control.setTransitionKind('crossfade')
+    control.queue('loud')
+    control.go()
+    // Land on the armed bar (2000) so the fade begins.
+    clockNow.set(2000)
+    control.tick()
+    expect(control.getSnapshot().fading).toBe(true)
+
+    // Refused — must not leak into the transition handleHello re-sends below.
+    control.setTransitionKind('cut')
+
+    messages.length = 0
+    clockNow.set(2300)
+    control.handleHello()
+
+    expect(messages.at(-1)).toStrictEqual({
+      at: 2000,
+      kind: 'switch',
+      to: 'b',
+      transition: { bars: 2, kind: 'crossfade' },
+    })
+  })
+
   it('re-publishes the switch with the new transition and the same `at` when the toggle changes while armed', () => {
     const clockNow = createFakeNow(0)
     const messages: OutputMessage[] = []

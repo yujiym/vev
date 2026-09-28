@@ -31,17 +31,26 @@
 
   <section>
     <h2>Queue</h2>
+    {#if snapshot?.fading}
+      <p role="status">Fade in progress — queueing is unavailable until it completes.</p>
+    {/if}
     {#each FIXTURES as fixture (fixture.id)}
-      <button onclick={() => control?.queue(fixture.id)} type="button">{fixture.title}</button>
+      <button disabled={snapshot?.fading} onclick={() => control?.queue(fixture.id)} type="button">
+        {fixture.title}
+      </button>
     {/each}
     <p>Next: {snapshot?.next ? snapshot.next.clipId : '—'}</p>
   </section>
 
   <section>
     <h2>Transition</h2>
+    {#if snapshot?.fading}
+      <p role="status">Fade in progress — the transition can't be changed until it completes.</p>
+    {/if}
     <label>
       <input
         checked={snapshot?.transitionKind === 'cut'}
+        disabled={snapshot?.fading}
         name="transition"
         onchange={() => control?.setTransitionKind('cut')}
         type="radio"
@@ -52,6 +61,7 @@
     <label>
       <input
         checked={snapshot?.transitionKind === 'crossfade'}
+        disabled={snapshot?.fading}
         name="transition"
         onchange={() => control?.setTransitionKind('crossfade')}
         type="radio"
@@ -63,7 +73,10 @@
 
   <section>
     <h2>Go</h2>
-    <button onclick={() => control?.go()} type="button">Go</button>
+    {#if snapshot?.fading}
+      <p role="status">Fade in progress — Go is unavailable until it completes; Go now finishes it early.</p>
+    {/if}
+    <button disabled={snapshot?.fading} onclick={() => control?.go()} type="button">Go</button>
     <button onclick={() => control?.goNow()} type="button">Go now</button>
   </section>
 

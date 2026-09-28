@@ -28,6 +28,8 @@ export interface ControlSnapshot {
   beatsPerBar: number
   bpm: number
   current: Loaded
+  /** True while a crossfade is running. `go`, `queue` and `setTransitionKind` are all refused during it; `goNow` is not refused — it finishes the fade immediately instead. See `playback.ts`'s `fading` guards. */
+  fading: boolean
   next: Loaded | undefined
   transitionKind: TransitionKind
 }
@@ -44,13 +46,13 @@ export interface Control {
   getSnapshot: () => ControlSnapshot
   /** Publishes clock, load and switch messages that restore the output to what it's showing. Call on `hello`. */
   handleHello: () => void
-  /** Fires the queued clip on the next bar. Does nothing if nothing is queued or Go is already armed. */
+  /** Fires the queued clip on the next bar. Does nothing if nothing is queued, Go is already armed, or a fade is running. */
   go: () => void
   /** Fires the queued clip immediately, or — mid-fade — finishes that fade immediately. Does nothing if neither applies. */
   goNow: () => void
-  /** Queues `clipId` into the free slot, publishing a `load` for it. */
+  /** Queues `clipId` into the free slot, publishing a `load` for it. Refused while a fade is running. */
   queue: (clipId: string) => void
-  /** Sets the transition Go/Go now will arm next. */
+  /** Sets the transition Go/Go now will arm next. Refused while a fade is running — it would either end the running fade early or desync it from what the output is blending. */
   setTransitionKind: (kind: TransitionKind) => void
   subscribe: (listener: (snapshot: ControlSnapshot) => void) => () => void
   /** Records a tap; once enough taps have accumulated, updates and publishes the tempo. */
@@ -84,6 +86,7 @@ export const createControl = (
     beatsPerBar: clock.beatsPerBar,
     bpm: clock.bpm,
     current: state.current,
+    fading: state.fading !== undefined,
     next: state.next,
     transitionKind: state.transition.kind,
   })
@@ -157,7 +160,11 @@ export const createControl = (
 
   const setTransitionKind = (kind: TransitionKind): void => {
     const transition = transitionFor(kind)
-    state = { ...state, transition }
+    // `reduce` refuses this outright while a fade is running (see
+    // `playback.ts`'s `set-transition` case) — `state.transition` then comes
+    // back unchanged and nothing below fires, so the panel neither ends the
+    // running fade early nor desyncs from what the output is blending.
+    state = reduce(state, { kind: 'set-transition', transition }, clock)
 
     // A performer changing their mind between Go and the bar landing is
     // legitimate — the surface that would forbid it (locking the toggle
@@ -168,7 +175,7 @@ export const createControl = (
     // superseding cleanly, not queuing behind or double-applying — see
     // `output-client.ts`'s `startOutput` doc comment.
     if (state.firing && state.next) {
-      publish({ at: state.firing.at, kind: 'switch', to: state.next.slot, transition })
+      publish({ at: state.firing.at, kind: 'switch', to: state.next.slot, transition: state.transition })
     }
     notify()
   }

@@ -90,6 +90,74 @@ describe('playback', () => {
     expect(state.current.clipId).toBe('quiet')
   })
 
+  it('refuses Go while a fade is running, changing nothing', () => {
+    const fade = { bars: 2, kind: 'crossfade' } as const
+    let state = initialPlayback('quiet', fade)
+    state = reduce(state, { clipId: 'loud', kind: 'select-next' }, clock)
+    state = reduce(state, { kind: 'go', now: 0 }, clock)
+    state = reduce(state, { kind: 'tick', now: 2000 }, clock)
+    expect(state.fading).toBeDefined()
+
+    const before = state
+    state = reduce(state, { kind: 'go', now: 2500 }, clock)
+    expect(state).toStrictEqual(before)
+  })
+
+  it("refuses to queue a new clip while a fade is running, leaving `next` as the fade's own destination", () => {
+    const fade = { bars: 2, kind: 'crossfade' } as const
+    let state = initialPlayback('quiet', fade)
+    state = reduce(state, { clipId: 'loud', kind: 'select-next' }, clock)
+    state = reduce(state, { kind: 'go', now: 0 }, clock)
+    state = reduce(state, { kind: 'tick', now: 2000 }, clock)
+    expect(state.fading).toBeDefined()
+
+    const before = state
+    state = reduce(state, { clipId: 'other', kind: 'select-next' }, clock)
+    expect(state).toStrictEqual(before)
+    expect(state.next?.clipId).toBe('loud')
+  })
+
+  it('refuses to change the transition kind while a fade is running', () => {
+    const fade = { bars: 2, kind: 'crossfade' } as const
+    let state = initialPlayback('quiet', fade)
+    state = reduce(state, { clipId: 'loud', kind: 'select-next' }, clock)
+    state = reduce(state, { kind: 'go', now: 0 }, clock)
+    state = reduce(state, { kind: 'tick', now: 2000 }, clock)
+    expect(state.fading).toBeDefined()
+
+    state = reduce(state, { kind: 'set-transition', transition: cut }, clock)
+    expect(state.transition).toStrictEqual(fade)
+    expect(state.fading).toBeDefined()
+  })
+
+  it('a refused mid-fade transition change does not shorten or complete the fade early', () => {
+    const fade = { bars: 2, kind: 'crossfade' } as const
+    let state = initialPlayback('quiet', fade)
+    state = reduce(state, { clipId: 'loud', kind: 'select-next' }, clock)
+    state = reduce(state, { kind: 'go', now: 0 }, clock)
+    state = reduce(state, { kind: 'tick', now: 2000 }, clock)
+    state = reduce(state, { kind: 'set-transition', transition: cut }, clock)
+
+    // A `cut` transition's `bars` is 0, which `tick` treats as instantly due —
+    // if the toggle above had taken effect, this tick would already show 'loud'.
+    state = reduce(state, { kind: 'tick', now: 3000 }, clock)
+    expect(state.current.clipId).toBe('quiet')
+    expect(state.fading).toBeDefined()
+
+    // The fade's original 2-bar span (4000ms) started at 2000, so it completes at 6000.
+    state = reduce(state, { kind: 'tick', now: 6000 }, clock)
+    expect(state.current).toStrictEqual({ clipId: 'loud', slot: 'b' })
+  })
+
+  it('allows changing the transition kind while Go is armed but not yet fading', () => {
+    let state = reduce(start(), { clipId: 'loud', kind: 'select-next' }, clock)
+    state = reduce(state, { kind: 'go', now: 2500 }, clock)
+    const crossfade = { bars: 2, kind: 'crossfade' } as const
+    state = reduce(state, { kind: 'set-transition', transition: crossfade }, clock)
+    expect(state.transition).toStrictEqual(crossfade)
+    expect(state.firing?.at).toBe(4000)
+  })
+
   it('completes a held crossfade once its bars finish', () => {
     const fade = { bars: 2, kind: 'crossfade' } as const
     let state = initialPlayback('quiet', fade)
