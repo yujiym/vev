@@ -8,6 +8,7 @@ import * as v from 'valibot'
 import { requireAccessAssertion } from './access.ts'
 import { settingsTable } from './db/schema.ts'
 import type { Env } from './env.ts'
+import { clipsRoutes } from './routes/clips.ts'
 
 const app = new Hono<{ Bindings: Env }>().basePath('/api')
 
@@ -32,6 +33,8 @@ const routes = app.get('/health', async (c) => {
   )
 })
 
-export type AppType = typeof routes
+const withClips = routes.route('/clips', clipsRoutes)
+
+export type AppType = typeof withClips
 
 export default app

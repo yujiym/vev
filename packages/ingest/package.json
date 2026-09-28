@@ -1,0 +1,19 @@
+{
+  "name": "@vev/ingest",
+  "version": "0.0.0",
+  "private": true,
+  "license": "AGPL-3.0-or-later",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "vp test"
+  },
+  "dependencies": {
+    "@vev/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "vitest": "4.1.11"
+  }
+}
