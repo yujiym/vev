@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest'
 import type { Env } from '../env.ts'
 import worker from '../index.ts'
 import { annotateClip } from './annotate.ts'
+import { enqueueAnnotation } from './consume.ts'
 import type { AiRunner } from './jev.ts'
 import { TAG_THRESHOLD, TAG_VOCABULARY } from './tags.ts'
 
@@ -278,6 +279,16 @@ describe('annotateClip — what it stores', () => {
     const tags = result.ok ? result.annotation.tags : []
     expect(tags.toSorted()).toStrictEqual([...TAGGED].toSorted())
     expect(tags).not.toContain(JUST_BELOW)
+  })
+
+  it('reports the confidence jev gave each typed answer, for the log', async () => {
+    const result = await annotateClip(createFakeAi(), CLIP)
+    expect(result.ok && result.confidence).toStrictEqual({
+      density: CANNED_CONFIDENCE,
+      energy: CANNED_CONFIDENCE,
+      layerHint: CANNED_CONFIDENCE,
+      motion: CANNED_CONFIDENCE,
+    })
   })
 
   it('stores the text model description', async () => {
@@ -555,5 +566,18 @@ describe('the ingest queue consumer', () => {
     const result = await runQueue({ clipId: crypto.randomUUID() }, createFakeAi())
     expect(result.explicitAcks).toContain('message-under-test')
     expect(result.retryMessages).toHaveLength(0)
+  })
+})
+
+describe(enqueueAnnotation, () => {
+  it('sends the clip id in the shape the consumer parses', async () => {
+    const sent: unknown[] = []
+    const queue = { send: async (body: unknown) => await Promise.resolve(sent.push(body)) }
+    await enqueueAnnotation(queue as unknown as Queue, 'clip-being-registered')
+    expect(sent).toStrictEqual([{ clipId: 'clip-being-registered' }])
+  })
+
+  it('does nothing when there is no queue binding, so local mode can still register', async () => {
+    await expect(enqueueAnnotation(undefined, 'clip-being-registered')).resolves.toBeUndefined()
   })
 })

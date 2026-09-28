@@ -102,12 +102,32 @@ export interface Annotation {
 }
 
 /**
+ * How sure jev was of each typed answer, for the log rather than for the row.
+ *
+ * Nothing branches on a confidence and no column stores one — this exists so `wrangler tail` shows
+ * how well the questions are actually working, which is the only way to tell "the vocabulary and
+ * the option descriptions are right" from "the model is guessing" on a library nobody has
+ * annotated yet. Every field is optional because `confidence` is parsed as optional (see
+ * `jev.ts`), and `noul` answers carry none at all.
+ */
+export interface AnnotationConfidence {
+  readonly density?: number
+  readonly energy?: number
+  readonly layerHint?: number
+  readonly motion?: number
+}
+
+/**
  * Annotation's outcome. A result, not a throw and not a partial `Annotation`: annotation failing is
  * an ordinary, expected outcome (§0 principle 2 — it must never block registration), and the caller
  * has to be able to write `annotationStatus: 'failed'` and leave every other column alone.
  */
 export type AnnotationResult =
-  | { readonly annotation: Annotation; readonly ok: true }
+  | {
+      readonly annotation: Annotation
+      readonly confidence: AnnotationConfidence
+      readonly ok: true
+    }
   | { readonly ok: false; readonly reason: string }
 
 /** The clip, as jev sees it. Spec §11: estimate mainly from the code — a still frame misjudges motion. */
@@ -170,6 +190,12 @@ const choiceOf = (answers: JevAnswerSet, id: string): string => {
   return answer.key
 }
 
+/** The confidence jev reported, or `undefined` when it reported none. Never a decision, only a log line. */
+const confidenceOf = (answers: JevAnswerSet, id: string): number | undefined => {
+  const answer = requireAnswer(answers, id)
+  return answer.kind === 'noul' ? undefined : answer.confidence
+}
+
 const probabilityOf = (answers: JevAnswerSet, id: string): number => {
   const answer = requireAnswer(answers, id)
   if (answer.kind !== 'noul') {
@@ -216,14 +242,27 @@ const describeClip = async (ai: AiRunner, clip: AnnotatableClip): Promise<string
   }
 }
 
-const askOnce = async (ai: AiRunner, clip: AnnotatableClip): Promise<Omit<Annotation, 'description'>> => {
+interface TypedAnswers {
+  readonly annotated: Omit<Annotation, 'description'>
+  readonly confidence: AnnotationConfidence
+}
+
+const askOnce = async (ai: AiRunner, clip: AnnotatableClip): Promise<TypedAnswers> => {
   const answers = await askJev(ai, buildState(clip), buildQuestions())
   return {
-    density: v.parse(clipDensitySchema, choiceOf(answers, DENSITY_ID)),
-    energy: energyFromScore(scoreOf(answers, ENERGY_ID)),
-    layerHint: v.parse(clipLayerHintSchema, choiceOf(answers, LAYER_HINT_ID)),
-    motion: v.parse(clipMotionSchema, choiceOf(answers, MOTION_ID)),
-    tags: tagsFrom(answers),
+    annotated: {
+      density: v.parse(clipDensitySchema, choiceOf(answers, DENSITY_ID)),
+      energy: energyFromScore(scoreOf(answers, ENERGY_ID)),
+      layerHint: v.parse(clipLayerHintSchema, choiceOf(answers, LAYER_HINT_ID)),
+      motion: v.parse(clipMotionSchema, choiceOf(answers, MOTION_ID)),
+      tags: tagsFrom(answers),
+    },
+    confidence: {
+      density: confidenceOf(answers, DENSITY_ID),
+      energy: confidenceOf(answers, ENERGY_ID),
+      layerHint: confidenceOf(answers, LAYER_HINT_ID),
+      motion: confidenceOf(answers, MOTION_ID),
+    },
   }
 }
 
@@ -243,10 +282,10 @@ export const annotateClip = async (ai: AiRunner, clip: AnnotatableClip): Promise
     try {
       // Sequential by design: attempt 2 exists only because attempt 1 failed.
       // oxlint-disable-next-line eslint/no-await-in-loop -- a retry must not start before the attempt it retries has failed
-      const answered = await askOnce(ai, clip)
+      const { annotated, confidence } = await askOnce(ai, clip)
       // oxlint-disable-next-line eslint/no-await-in-loop -- same loop; the description is best-effort and only runs once the typed answers are in
       const description = await describeClip(ai, clip)
-      return { annotation: { ...answered, description }, ok: true }
+      return { annotation: { ...annotated, description }, confidence, ok: true }
     } catch (error) {
       reason = error instanceof Error ? error.message : String(error)
       console.error(`annotate: attempt ${attempt} of ${JEV_ATTEMPTS} failed`, error)

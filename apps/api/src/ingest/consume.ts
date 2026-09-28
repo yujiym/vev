@@ -77,6 +77,18 @@ const annotateOne = async (env: Env, clipId: string): Promise<void> => {
   }
 
   const { annotation } = result
+  // The one place a successful annotation is observable from `wrangler tail`. It records how sure
+  // jev was of each typed answer, which is the only signal available for whether the option
+  // descriptions and the tag threshold are working — no column stores a confidence, and nothing
+  // branches on one.
+  console.log(`ingest: clip ${clipId} annotated`, {
+    confidence: result.confidence,
+    density: annotation.density,
+    energy: annotation.energy,
+    layerHint: annotation.layerHint,
+    motion: annotation.motion,
+    tags: annotation.tags,
+  })
   await db
     .update(clipsTable)
     .set({
