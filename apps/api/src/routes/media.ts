@@ -2,6 +2,7 @@
 import { eq } from 'drizzle-orm'
 import { drizzle } from 'drizzle-orm/d1'
 import { Hono } from 'hono'
+import * as v from 'valibot'
 
 import { clipsTable } from '../db/clips.ts'
 import type { Env } from '../env.ts'
@@ -10,6 +11,17 @@ import type { Env } from '../env.ts'
 const MEDIA_CACHE_CONTROL = 'public, max-age=31536000, immutable'
 
 const thumbnailKeyFor = (clipId: string): string => `thumbnails/${clipId}.webm`
+
+/**
+ * The palette, as `dominantColours` (`apps/web/src/lib/palette.ts`) produces it: lower-case
+ * `#rrggbb`, at most a handful. Capped at eight so a malformed or hostile caller cannot write an
+ * unbounded JSON array into the row; `dominantColours` returns five.
+ */
+const paletteSchema = v.pipe(
+  v.array(v.pipe(v.string(), v.regex(/^#[0-9a-f]{6}$/u))),
+  v.minLength(1),
+  v.maxLength(8),
+)
 
 /**
  * `POST /api/clips/:id/thumbnail` — accepts the registration screen's recorded WebM
@@ -27,6 +39,28 @@ export const clipThumbnailRoutes = new Hono<{ Bindings: Env }>().post('/:id/thum
     return c.text('Not Found', 404)
   }
 
+  // The palette rides along with the recording it was measured from (`?palette=#rrggbb,#rrggbb`).
+  // It does NOT belong in the registration payload: spec §5 lists `palette` among the annotated
+  // fields, and Task 1 ruled that annotated and server-owned fields are absent from
+  // `newClipSchema` rather than present-and-overridden. But the browser MEASURES it from the frames
+  // the clip actually rendered (`dominantColours`, spec §11) and the Worker cannot — it has no
+  // WebGL — so it is evidence the client produces, exactly like the thumbnail bytes it arrives
+  // with, rather than a claim the client makes about its own clip. An absent parameter means "not
+  // measured" and leaves the column alone; a present-but-unparseable one is a 400 naming what is
+  // accepted, the same treatment `GET /api/clips`'s filters get.
+  const paletteParam = c.req.query('palette')
+  let palette: string[] | undefined
+  if (paletteParam !== undefined) {
+    const parsed = v.safeParse(paletteSchema, paletteParam.split(','))
+    if (!parsed.success) {
+      return c.text(
+        `palette must be 1-8 comma-separated lower-case #rrggbb colours; got "${paletteParam}"`,
+        400,
+      )
+    }
+    palette = parsed.output
+  }
+
   const contentType = c.req.header('content-type')
   const body = await c.req.arrayBuffer()
   if (body.byteLength === 0) {
@@ -39,9 +73,12 @@ export const clipThumbnailRoutes = new Hono<{ Bindings: Env }>().post('/:id/thum
       contentType: contentType === undefined || contentType === '' ? 'video/webm' : contentType,
     },
   })
-  await db.update(clipsTable).set({ thumbnailKey: key }).where(eq(clipsTable.id, id))
+  await db
+    .update(clipsTable)
+    .set(palette === undefined ? { thumbnailKey: key } : { palette, thumbnailKey: key })
+    .where(eq(clipsTable.id, id))
 
-  return c.json({ thumbnailKey: key }, 201)
+  return c.json({ palette, thumbnailKey: key }, 201)
 })
 
 /**

@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import { clipDensitySchema, clipEnergySchema, clipLayerHintSchema, clipMotionSchema } from '@vev/shared'
-import type { ClipDensity, ClipEnergy, ClipLayerHint, ClipMotion, EngineKind } from '@vev/shared'
+import type { ClipDensity, ClipDeps, ClipEnergy, ClipLayerHint, ClipMotion, EngineKind } from '@vev/shared'
 import * as v from 'valibot'
 
 import type { AiRunner, JevAnswer, JevAnswerSet, JevQuestionSet } from './jev.ts'
 import { askJev, choiceQuestion, noulQuestion, scoreQuestion } from './jev.ts'
-import { TAG_THRESHOLD, TAG_VOCABULARY } from './tags.ts'
+import { derivedTags, TAG_THRESHOLD, TAG_VOCABULARY } from './tags.ts'
 
 /**
  * Annotation: the step the whole project is premised on.
@@ -34,6 +34,45 @@ const DESCRIPTION_MODEL = '@cf/qwen/qwen2.5-coder-32b-instruct'
 const JEV_ATTEMPTS = 2
 
 const DESCRIPTION_MAX_TOKENS = 160
+
+/**
+ * How long either model gets to answer before the attempt is abandoned.
+ *
+ * These exist because a call that never resolves is the ONE failure mode that does not end in
+ * `annotationStatus: 'failed'`. Without a timeout, `annotateClip` never returns, the consumer never
+ * acks, the queue redelivers until `max_retries: 2` is spent, and the clip is silently dropped
+ * still marked `pending` — a state nothing in the UI distinguishes from "annotation hasn't run
+ * yet". Whether Workers AI caps a hung call server-side is undocumented, and a defence that rests
+ * on someone else's undocumented timeout is not a defence.
+ *
+ * 30s for jev and 20s for the description model are chosen to be an order of magnitude longer than
+ * any inference observed on this account (the `@cf/qwen` probe answered in well under a second)
+ * while keeping the worst case — two attempts, each a jev call plus a description call — at about
+ * 100 seconds, far inside a queue consumer's delivery budget. Nobody is waiting on this: annotation
+ * is asynchronous by §11.1, so the cost of a generous timeout is latency on a failure path, and the
+ * cost of a tight one is a correct answer thrown away.
+ */
+const JEV_TIMEOUT_MS = 30_000
+const DESCRIPTION_TIMEOUT_MS = 20_000
+
+/**
+ * Rejects `work` if it has not settled within `ms`. The timer is always cleared, so a call that
+ * answers in time does not keep the isolate alive waiting for a timeout that no longer matters.
+ */
+const withTimeout = async <T>(work: Promise<T>, ms: number, what: string): Promise<T> => {
+  const expiry = Promise.withResolvers<never>()
+  const timer = setTimeout(() => {
+    expiry.reject(new Error(`annotate: ${what} did not answer within ${ms}ms`))
+  }, ms)
+  try {
+    return await Promise.race([work, expiry.promise])
+  } finally {
+    // Both directions matter: a call that answered in time must not leave a timer pending, and a
+    // timer that already fired must not leave its rejection unobserved — `Promise.race` above is
+    // what observes it.
+    clearTimeout(timer)
+  }
+}
 
 /** Question ids. They are the keys of both the request and the response, so they are named once. */
 const ENERGY_ID = 'energy'
@@ -84,9 +123,14 @@ const LAYER_HINT_OPTIONS: Readonly<Record<ClipLayerHint, string>> = {
   fg: 'Belongs on top: distinct elements against large dark or empty areas, so it composites over another clip.',
 }
 
-/** What annotation needs from a clip. Narrower than `Clip` on purpose — annotation reads the code, not the row. */
+/**
+ * What annotation needs from a clip. Narrower than `Clip` on purpose — annotation reads the code,
+ * not the row. `deps` is here not because a model is asked about it but because it is what a model
+ * must NOT be asked about: `derivedTags` turns `usesFeedback` and `usesAudio` straight into tags.
+ */
 export interface AnnotatableClip {
   readonly code: string
+  readonly deps: ClipDeps
   readonly engine: EngineKind
   readonly title: string
 }
@@ -204,7 +248,14 @@ const probabilityOf = (answers: JevAnswerSet, id: string): number => {
   return answer.probability
 }
 
-/** The tags whose probability cleared `TAG_THRESHOLD`, in vocabulary order so the stored array is stable. */
+/**
+ * The tags whose probability cleared `TAG_THRESHOLD`, in vocabulary order so the stored array is
+ * stable across runs.
+ *
+ * The comparison is STRICT: a probability exactly equal to the threshold is NOT tagged. That is a
+ * decision, not an accident — the threshold names the confidence a tag must EXCEED, so the only
+ * value it can describe unambiguously is one on the excluded side of it. A test pins the boundary.
+ */
 const tagsFrom = (answers: JevAnswerSet): string[] =>
   TAG_VOCABULARY.filter((tag) => probabilityOf(answers, tagQuestionId(tag.name)) > TAG_THRESHOLD).map(
     (tag) => tag.name,
@@ -220,20 +271,24 @@ const descriptionResponseSchema = v.object({ response: v.string() })
  */
 const describeClip = async (ai: AiRunner, clip: AnnotatableClip): Promise<string> => {
   try {
-    const raw = await ai.run(DESCRIPTION_MODEL, {
-      max_tokens: DESCRIPTION_MAX_TOKENS,
-      messages: [
-        {
-          content:
-            'You describe generative visuals for a VJ clip library. Answer with one or two plain sentences about what appears on screen — colour, shape and movement. No code, no markdown, no preamble.',
-          role: 'system',
-        },
-        {
-          content: `Describe this ${clip.engine} clip, titled "${clip.title}":\n\n${clip.code}`,
-          role: 'user',
-        },
-      ],
-    })
+    const raw = await withTimeout(
+      ai.run(DESCRIPTION_MODEL, {
+        max_tokens: DESCRIPTION_MAX_TOKENS,
+        messages: [
+          {
+            content:
+              'You describe generative visuals for a VJ clip library. Answer with one or two plain sentences about what appears on screen — colour, shape and movement. No code, no markdown, no preamble.',
+            role: 'system',
+          },
+          {
+            content: `Describe this ${clip.engine} clip, titled "${clip.title}":\n\n${clip.code}`,
+            role: 'user',
+          },
+        ],
+      }),
+      DESCRIPTION_TIMEOUT_MS,
+      'the description model',
+    )
     const parsed = v.safeParse(descriptionResponseSchema, raw)
     return parsed.success ? parsed.output.response.trim() : ''
   } catch (error) {
@@ -248,14 +303,16 @@ interface TypedAnswers {
 }
 
 const askOnce = async (ai: AiRunner, clip: AnnotatableClip): Promise<TypedAnswers> => {
-  const answers = await askJev(ai, buildState(clip), buildQuestions())
+  const answers = await withTimeout(askJev(ai, buildState(clip), buildQuestions()), JEV_TIMEOUT_MS, 'jev')
   return {
     annotated: {
       density: v.parse(clipDensitySchema, choiceOf(answers, DENSITY_ID)),
       energy: energyFromScore(scoreOf(answers, ENERGY_ID)),
       layerHint: v.parse(clipLayerHintSchema, choiceOf(answers, LAYER_HINT_ID)),
       motion: v.parse(clipMotionSchema, choiceOf(answers, MOTION_ID)),
-      tags: tagsFrom(answers),
+      // Judged tags first, then the two derived from the static dependency analysis; the two sets
+      // are disjoint by construction, since `derivedTags`' names were removed from the vocabulary.
+      tags: [...tagsFrom(answers), ...derivedTags(clip.deps)],
     },
     confidence: {
       density: confidenceOf(answers, DENSITY_ID),

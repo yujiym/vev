@@ -53,7 +53,14 @@ const markFailed = async (env: Env, clipId: string): Promise<void> => {
 const annotateOne = async (env: Env, clipId: string): Promise<void> => {
   const db = drizzle(env.DB)
   const [row] = await db
-    .select({ code: clipsTable.code, engine: clipsTable.engine, title: clipsTable.title })
+    .select({
+      code: clipsTable.code,
+      // `deps` is read for annotation too: two of a clip's tags are derived from it rather than
+      // asked of a model (see `derivedTags`, `tags.ts`).
+      deps: clipsTable.deps,
+      engine: clipsTable.engine,
+      title: clipsTable.title,
+    })
     .from(clipsTable)
     .where(eq(clipsTable.id, clipId))
 

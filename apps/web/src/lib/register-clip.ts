@@ -232,18 +232,31 @@ export const submitClip = async (payload: NewClip, fetchImpl: typeof fetch = fet
   return v.parse(clipSchema, body)
 }
 
-const thumbnailUploadSchema = v.object({ thumbnailKey: v.pipe(v.string(), v.minLength(1)) })
+const thumbnailUploadSchema = v.object({
+  palette: v.optional(v.array(v.pipe(v.string(), v.minLength(1)))),
+  thumbnailKey: v.pipe(v.string(), v.minLength(1)),
+})
 
 /**
  * Uploads a recorded thumbnail (`recordThumbnail`, `$lib/palette.ts`) for an already-registered
  * clip: `POST /api/clips/:id/thumbnail` with the WebM blob as the request body.
+ *
+ * The palette travels with the recording rather than with the registration payload, because it is
+ * MEASURED from the frames this recording captured (`dominantColours`, spec §11) and the Worker
+ * has no WebGL to measure it itself. It is evidence produced alongside the bytes, not a claim the
+ * registrant makes — which is why it is not in `newClipSchema` (spec §5 lists `palette` among the
+ * annotated fields, and those are absent from the registration payload by construction). A clip
+ * with no thumbnail therefore has no palette, which is already true of the thumbnail itself.
  */
 export const submitThumbnail = async (
   clipId: string,
   blob: Blob,
+  palette: readonly string[] = [],
   fetchImpl: typeof fetch = fetch,
-): Promise<{ thumbnailKey: string }> => {
-  const endpoint = `${REGISTER_CLIP_ENDPOINT}/${clipId}/thumbnail`
+): Promise<{ palette?: string[]; thumbnailKey: string }> => {
+  const query =
+    palette.length === 0 ? '' : `?${new URLSearchParams({ palette: palette.join(',') }).toString()}`
+  const endpoint = `${REGISTER_CLIP_ENDPOINT}/${clipId}/thumbnail${query}`
   const response = await fetchImpl(endpoint, {
     body: blob,
     headers: { 'content-type': blob.type === '' ? 'video/webm' : blob.type },

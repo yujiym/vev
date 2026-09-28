@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-import { SELF } from 'cloudflare:test'
+import { env, SELF } from 'cloudflare:test'
 import { describe, expect, it } from 'vitest'
 
 const ACCESS_HEADERS = { 'Cf-Access-Jwt-Assertion': 'zzz-not-a-real-jwt-zzz' }
@@ -31,12 +31,18 @@ const uploadThumbnail = async (
   clipId: string,
   bytes: string,
   headers: Record<string, string> = ACCESS_HEADERS,
+  query = '',
 ) =>
-  await SELF.fetch(`https://vev.test/api/clips/${clipId}/thumbnail`, {
+  await SELF.fetch(`https://vev.test/api/clips/${clipId}/thumbnail${query}`, {
     body: bytes,
     headers: { 'content-type': 'video/webm', ...headers },
     method: 'POST',
   })
+
+/** The palette as the registration page measures it (`dominantColours`) — never a default. */
+const MEASURED_PALETTE = ['#204060', '#f0e0c0', '#802040']
+const paletteQuery = (colours: readonly string[]) =>
+  `?${new URLSearchParams({ palette: colours.join(',') }).toString()}`
 
 describe('POST /api/clips/:id/thumbnail', () => {
   it('stores the upload in MEDIA and records the key on the clip row', async () => {
@@ -67,6 +73,45 @@ describe('POST /api/clips/:id/thumbnail', () => {
   it('rejects an empty body', async () => {
     const clipId = await registerClip()
     const response = await uploadThumbnail(clipId, '')
+    expect(response.status).toBe(400)
+  })
+
+  it('stores the palette measured from the frames this recording captured', async () => {
+    const clipId = await registerClip()
+
+    const response = await uploadThumbnail(
+      clipId,
+      'fake webm bytes',
+      ACCESS_HEADERS,
+      paletteQuery(MEASURED_PALETTE),
+    )
+    expect(response.status).toBe(201)
+
+    const row = await env.DB.prepare('select palette from clips where id = ?').bind(clipId).first()
+    expect(JSON.parse(String(row?.palette))).toStrictEqual(MEASURED_PALETTE)
+  })
+
+  it('leaves palette null when the upload measured none', async () => {
+    const clipId = await registerClip()
+    await uploadThumbnail(clipId, 'fake webm bytes')
+
+    const row = await env.DB.prepare('select palette from clips where id = ?').bind(clipId).first()
+    expect(row?.palette).toBeNull()
+  })
+
+  it('rejects an unparseable palette rather than silently dropping it', async () => {
+    const clipId = await registerClip()
+    const response = await uploadThumbnail(clipId, 'bytes', ACCESS_HEADERS, '?palette=teal,#f0e0c0')
+    expect(response.status).toBe(400)
+
+    const row = await env.DB.prepare('select palette from clips where id = ?').bind(clipId).first()
+    expect(row?.palette).toBeNull()
+  })
+
+  it('refuses a palette longer than any real measurement, so a row cannot be stuffed', async () => {
+    const clipId = await registerClip()
+    const tooMany = Array.from({ length: 9 }, (_unused, index) => `#00000${index}`)
+    const response = await uploadThumbnail(clipId, 'bytes', ACCESS_HEADERS, paletteQuery(tooMany))
     expect(response.status).toBe(400)
   })
 })

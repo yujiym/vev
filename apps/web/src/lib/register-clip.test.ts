@@ -197,7 +197,7 @@ describe(submitThumbnail, () => {
       .mockResolvedValue(jsonResponse({ thumbnailKey: 'thumbnails/some-id.webm' }))
     const blob = new Blob(['fake webm bytes'], { type: 'video/webm' })
 
-    const result = await submitThumbnail('some-id', blob, fetchImpl)
+    const result = await submitThumbnail('some-id', blob, [], fetchImpl)
 
     expect(result).toStrictEqual({ thumbnailKey: 'thumbnails/some-id.webm' })
     expect(fetchImpl).toHaveBeenCalledWith(
@@ -206,10 +206,37 @@ describe(submitThumbnail, () => {
     )
   })
 
+  it('sends the measured palette alongside the recording it was measured from', async () => {
+    const fetchImpl = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(
+        jsonResponse({ palette: ['#204060', '#f0e0c0'], thumbnailKey: 'thumbnails/some-id.webm' }),
+      )
+    const blob = new Blob(['fake webm bytes'], { type: 'video/webm' })
+
+    const result = await submitThumbnail('some-id', blob, ['#204060', '#f0e0c0'], fetchImpl)
+
+    expect(result.palette).toStrictEqual(['#204060', '#f0e0c0'])
+    expect(fetchImpl).toHaveBeenCalledWith(
+      '/api/clips/some-id/thumbnail?palette=%23204060%2C%23f0e0c0',
+      expect.objectContaining({ body: blob, method: 'POST' }),
+    )
+  })
+
+  it('sends no palette parameter at all when nothing was measured', async () => {
+    const fetchImpl = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(jsonResponse({ thumbnailKey: 'thumbnails/some-id.webm' }))
+
+    await submitThumbnail('some-id', new Blob(['x'], { type: 'video/webm' }), [], fetchImpl)
+
+    expect(fetchImpl).toHaveBeenCalledWith('/api/clips/some-id/thumbnail', expect.anything())
+  })
+
   it('throws with the status when the upload fails', async () => {
     const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({}, false, 404))
     const blob = new Blob(['x'], { type: 'video/webm' })
 
-    await expect(submitThumbnail('missing-id', blob, fetchImpl)).rejects.toThrow('404')
+    await expect(submitThumbnail('missing-id', blob, [], fetchImpl)).rejects.toThrow('404')
   })
 })

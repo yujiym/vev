@@ -125,7 +125,7 @@
       savedClipId = clip.id
 
       if (thumbnailBlob) {
-        await submitThumbnail(clip.id, thumbnailBlob)
+        await submitThumbnail(clip.id, thumbnailBlob, palette)
       }
     } catch (error) {
       saveError = error instanceof Error ? error.message : String(error)

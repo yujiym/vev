@@ -35,7 +35,12 @@ import * as v from 'valibot'
  * because they are what a live call will confirm or refute first:
  *
  * 1. The response envelope. The page shows a per-question answer but not what wraps them, so this
- *    assumes the natural pairing — an object keyed by the same question ids the request used.
+ *    assumes only that each answer sits under the question id that asked for it. It deliberately
+ *    does NOT assume the envelope contains nothing else: `jev-facts.md`'s own verified Workers AI
+ *    response was `{ response, usage }`, so a `usage` (or `request_id`, or `meta`) sibling next to
+ *    the answers is entirely likely, and a parser that demanded every top-level key be an answer
+ *    would fail EVERY clip on the first live call. Ids that were asked for are looked up and
+ *    decoded; anything else in the envelope is ignored.
  * 2. `confidence` is parsed as OPTIONAL on `score` and `choice` even though it is documented as
  *    present, because nothing here reads it for a decision: requiring an unused field would turn a
  *    cosmetic shape difference into a failed annotation for every clip.
@@ -151,7 +156,12 @@ const answerSchema = v.union([
   v.object({ noul: v.pipe(v.number(), v.minValue(0), v.maxValue(1)), type: v.literal('noul') }),
 ])
 
-const answersSchema = v.record(v.string(), answerSchema)
+/**
+ * The envelope, deliberately permissive: an object, with each asked id looked up inside it. Sibling
+ * keys the request never asked about (`usage`, a request id, a model name) pass through untouched —
+ * see assumption 1 in this module's header for why that is not laxness but the whole point.
+ */
+const envelopeSchema = v.record(v.string(), v.unknown())
 
 type WireAnswer = v.InferOutput<typeof answerSchema>
 
@@ -209,19 +219,25 @@ export const askJev = async (
   const wireQuestions = Object.fromEntries(asked.map(([id, question]) => [id, toWireQuestion(question)]))
 
   const raw = await ai.run(JEV_MODEL, { questions: wireQuestions, state })
-  const parsed = v.safeParse(answersSchema, raw)
-  if (!parsed.success) {
-    throw new Error(`jev: response did not parse — ${parsed.issues[0]?.message ?? 'unknown issue'}`)
+  const envelope = v.safeParse(envelopeSchema, raw)
+  if (!envelope.success) {
+    throw new Error('jev: response was not an object of answers keyed by question id')
   }
 
-  const { output } = parsed
+  const { output } = envelope
   return Object.fromEntries(
     asked.map(([id, question]) => {
-      const answer = output[id]
-      if (answer === undefined) {
+      const value = output[id]
+      if (value === undefined) {
         throw new Error(`jev: response had no answer for question "${id}"`)
       }
-      return [id, decodeAnswer(id, question, answer)]
+      const answer = v.safeParse(answerSchema, value)
+      if (!answer.success) {
+        throw new Error(
+          `jev: answer to "${id}" did not parse — ${answer.issues[0]?.message ?? 'unknown issue'}`,
+        )
+      }
+      return [id, decodeAnswer(id, question, answer.output)]
     }),
   )
 }

@@ -16,6 +16,12 @@
  * Annotation reads a clip's CODE, not its thumbnail — spec §11 records the lesson that still
  * frames lead to wrong judgements about motion — so every statement below is phrased about what
  * the code makes the renderer do.
+ *
+ * What is NOT here is as deliberate as what is. `feedback` and `audio-reactive` were in this list
+ * and have been removed: `analyzeHydra` (`@vev/ingest`) already derives `deps.usesFeedback` and
+ * `deps.usesAudio` from the clip's own source, deterministically, at registration. Asking a
+ * probabilistic model the same question produces two answers to one question with no tiebreaker —
+ * so those two tags come from `derivedTags` below instead, and jev is never asked.
  */
 export interface TagDefinition {
   /** The stored tag, exactly as it appears in `Clip.tags` and in a `?tag=` filter. */
@@ -37,7 +43,12 @@ export interface TagDefinition {
  */
 export const TAG_THRESHOLD = 0.6
 
-/** Twenty tags describing what a Hydra sketch puts on screen (§5: "kaleidoscope", "noise", "ascii", ...). */
+/**
+ * Eighteen tags describing what a Hydra sketch puts on screen (§5: "kaleidoscope", "noise",
+ * "ascii", ...). The count is an UNMEASURED GUESS, exactly like `TAG_THRESHOLD` above — it was
+ * twenty until `feedback` and `audio-reactive` moved to `derivedTags`, and nothing about eighteen
+ * has been validated against a real library either.
+ */
 export const TAG_VOCABULARY: readonly TagDefinition[] = [
   {
     name: 'kaleidoscope',
@@ -51,12 +62,6 @@ export const TAG_VOCABULARY: readonly TagDefinition[] = [
     statement: 'The clip is built mainly from procedural noise rather than from clean shapes.',
     whenFalse: 'The image comes from oscillators, gradients, solids or external sources, not from noise.',
     whenTrue: 'A noise or voronoi field is the dominant source of the image.',
-  },
-  {
-    name: 'feedback',
-    statement: 'The clip feeds a previous frame back into itself, so the image trails or accumulates.',
-    whenFalse: 'Every frame is drawn from scratch; nothing from an earlier frame is sampled.',
-    whenTrue: 'The code samples an output buffer it also writes, producing trails, echoes or infinite zooms.',
   },
   {
     name: 'geometric',
@@ -154,10 +159,25 @@ export const TAG_VOCABULARY: readonly TagDefinition[] = [
     whenFalse: 'No readable characters appear.',
     whenTrue: 'Text or character glyphs are drawn, whether legible words or an ASCII-style grid.',
   },
-  {
-    name: 'audio-reactive',
-    statement: 'The clip is driven by audio input, so what it renders depends on sound.',
-    whenFalse: 'Nothing in the image responds to sound; motion comes from time alone.',
-    whenTrue: 'An audio analysis value (an FFT bin, for instance) drives a visual parameter.',
-  },
 ]
+
+/**
+ * The tags that are FACTS about a clip's code rather than judgements about its output.
+ *
+ * Both come from `analyzeHydra`'s dependency analysis (spec §11.1), which reads the source
+ * statically at registration: `src(o0)` is feedback and `a.fft` is audio, and neither is a matter
+ * of opinion. They are surfaced as tags because the library filters on tags — a performer looking
+ * for feedback clips searches tags, not `deps` — but they are never asked of a model, because a
+ * probabilistic answer that disagreed with the static one would leave the row self-contradictory
+ * with nothing to break the tie.
+ */
+export const derivedTags = (deps: { usesAudio: boolean; usesFeedback: boolean }): string[] => {
+  const tags: string[] = []
+  if (deps.usesFeedback) {
+    tags.push('feedback')
+  }
+  if (deps.usesAudio) {
+    tags.push('audio-reactive')
+  }
+  return tags
+}
