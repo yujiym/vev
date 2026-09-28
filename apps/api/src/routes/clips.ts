@@ -16,7 +16,7 @@ import {
   newClipSchema,
 } from '@vev/shared'
 import type { Clip, ClipDeps } from '@vev/shared'
-import { and, eq, like } from 'drizzle-orm'
+import { and, eq, sql } from 'drizzle-orm'
 import { drizzle } from 'drizzle-orm/d1'
 import { Hono } from 'hono'
 import * as v from 'valibot'
@@ -45,6 +45,26 @@ const slugify = (engine: string, title: string, id: string): string => {
     .replaceAll(/[^a-z0-9]+/gu, '-')
     .replaceAll(/^-+|-+$/gu, '')
   return `${engine}/${words === '' ? 'clip' : words}-${id.slice(0, 8)}`
+}
+
+/**
+ * Whether a failed insert failed because `clips.slug` is already taken, as opposed to anything
+ * else. D1 reports it as `UNIQUE constraint failed: clips.slug` and drizzle wraps that in a
+ * `DrizzleQueryError` whose `cause` carries the text, so the whole chain is searched rather than
+ * just the top-level message. Naming the column, not merely "UNIQUE", keeps this from swallowing
+ * a future constraint on some other column as though it were a slug collision.
+ */
+const isSlugCollision = (error: Error): boolean => {
+  let current: Error | undefined = error
+  // Bounded rather than "walk until the chain ends": a `cause` that points back at its own error
+  // is malformed, not impossible, and this loop is in a request path.
+  for (let depth = 0; current !== undefined && depth < 5; depth += 1) {
+    if (current.message.includes('UNIQUE constraint failed: clips.slug')) {
+      return true
+    }
+    current = current.cause instanceof Error ? current.cause : undefined
+  }
+  return false
 }
 
 type ClipRow = typeof clipsTable.$inferSelect
@@ -122,7 +142,21 @@ export const clipsRoutes = new Hono<{ Bindings: Env }>()
     })
 
     const db = drizzle(c.env.DB)
-    await db.insert(clipsTable).values(row)
+    try {
+      await db.insert(clipsTable).values(row)
+    } catch (error) {
+      // `clips.slug` is UNIQUE and the registration form offers a slug field, so this is a
+      // refusal a registrant reaches by typing — and the one registration failure whose cure is a
+      // specific edit. It surfaced as an opaque 500 from the constraint; it is a 409 naming the
+      // slug that is taken, like every other refusal this route makes.
+      if (error instanceof Error && isSlugCollision(error)) {
+        return c.text(
+          `Slug "${slug}" is already taken by another clip. Choose a different slug, or leave the field empty and one will be generated.`,
+          409,
+        )
+      }
+      throw error
+    }
 
     // Annotation is asynchronous and MUST NOT block registration (§0 principle 2, §11.1): the row
     // is already stored and already `annotationStatus: 'pending'`, so a queue that is absent (local
@@ -163,10 +197,23 @@ export const clipsRoutes = new Hono<{ Bindings: Env }>()
       reviewedFilter = reviewedParam === 'true'
     }
 
+    // `tags` is a JSON array in a text column, so membership is asked of the array's elements
+    // rather than of the text around them. The `LIKE '%"<tag>"%'` this replaces was a silent
+    // wrong answer, not merely a loose one: `%` returned every tagged clip and `_eon` matched
+    // `neon`, both with a 200, so a caller who believed they had filtered had not — exactly what
+    // the 400 on an unparseable `engine` exists to prevent, one filter over. Escaping the two
+    // wildcards would have fixed those two cases and left `LIKE` matching a tag as a substring of
+    // a longer one; `json_each` answers the question the caller actually asked. A tag containing
+    // a literal `%` or `_` is an ordinary tag here, because nothing is a pattern.
+    //
+    // `tags IS NOT NULL` is explicit: an unannotated clip's column is SQL NULL, and `json_each`
+    // is not owed an opinion about what to do with that.
     const conditions = [
       engineFilter === undefined ? undefined : eq(clipsTable.engine, engineFilter),
       reviewedFilter === undefined ? undefined : eq(clipsTable.reviewed, reviewedFilter),
-      tagParam === undefined ? undefined : like(clipsTable.tags, `%"${tagParam}"%`),
+      tagParam === undefined
+        ? undefined
+        : sql`${clipsTable.tags} is not null and exists (select 1 from json_each(${clipsTable.tags}) where json_each.value = ${tagParam})`,
     ].filter((condition) => condition !== undefined)
 
     const rows = await db
@@ -200,7 +247,14 @@ export const clipsRoutes = new Hono<{ Bindings: Env }>()
       return c.text('Not Found', 404)
     }
 
-    await db.update(clipsTable).set(patch).where(eq(clipsTable.id, id))
+    // Every field of `clipPatchSchema` is optional, so `{}` validates — and drizzle's
+    // `set({})` throws "No values to set", which reached the caller as a 500. An empty patch is
+    // not a failure, it is a request that changes nothing: skip the write and answer with the
+    // clip as it stands, which is what `PATCH /api/tracks/:id` already does with its own
+    // statement list.
+    if (Object.keys(patch).length > 0) {
+      await db.update(clipsTable).set(patch).where(eq(clipsTable.id, id))
+    }
     const [updated] = await db.select().from(clipsTable).where(eq(clipsTable.id, id))
     if (updated === undefined) {
       return c.text('Not Found', 404)

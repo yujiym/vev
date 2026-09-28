@@ -97,6 +97,22 @@ describe('POST /api/clips', () => {
     const response = await postClip(minimalPayload(), {})
     expect(response.status).toBe(403)
   })
+
+  it('refuses a colliding client-supplied slug with a 409 naming it, not an opaque 500', async () => {
+    const first = await postClip({ ...minimalPayload(), slug: 'hydra/already-taken' })
+    expect(first.status).toBe(201)
+
+    const second = await postClip({ ...minimalPayload(), slug: 'hydra/already-taken' })
+    expect(second.status).toBe(409)
+    await expect(second.text()).resolves.toContain('hydra/already-taken')
+  })
+
+  it('leaves a generated slug alone — the collision path must not fire on the ordinary case', async () => {
+    const response = await postClip(minimalPayload())
+    expect(response.status).toBe(201)
+    const body = await readJson<{ slug: string }>(response)
+    expect(body.slug).toMatch(/^hydra\/aquatic-blubs-/u)
+  })
 })
 
 describe('GET /api/clips', () => {
@@ -189,6 +205,65 @@ describe('GET /api/clips', () => {
     expect(includedBody.clips).toHaveLength(1)
   })
 
+  it('treats a tag filter as a literal tag, not a LIKE pattern: "%" matches no tag called "%"', async () => {
+    const created = await postClip({ ...minimalPayload(), title: 'wildcard bait' })
+    const { id } = await readJson<{ id: string }>(created)
+    await env.DB.prepare('update clips set tags = ? where id = ?')
+      .bind(JSON.stringify(['neon', 'dark']), id)
+      .run()
+
+    const response = await SELF.fetch('https://vev.test/api/clips?tag=%25', { headers: ACCESS_HEADERS })
+    expect(response.status).toBe(200)
+    const body = await readJson<{ clips: ClipSummary[] }>(response)
+    expect(body.clips.map((clip) => clip.id)).not.toContain(id)
+  })
+
+  it('does not let "_" stand in for a character: "_eon" must not match "neon"', async () => {
+    const created = await postClip({ ...minimalPayload(), title: 'underscore bait' })
+    const { id } = await readJson<{ id: string }>(created)
+    await env.DB.prepare('update clips set tags = ? where id = ?')
+      .bind(JSON.stringify(['neon']), id)
+      .run()
+
+    const response = await SELF.fetch('https://vev.test/api/clips?tag=_eon', { headers: ACCESS_HEADERS })
+    const body = await readJson<{ clips: ClipSummary[] }>(response)
+    expect(body.clips.map((clip) => clip.id)).not.toContain(id)
+  })
+
+  it('matches a tag that itself contains a "%" — a literal per cent is a legitimate tag', async () => {
+    const created = await postClip({ ...minimalPayload(), title: 'per cent tag' })
+    const { id } = await readJson<{ id: string }>(created)
+    await env.DB.prepare('update clips set tags = ? where id = ?')
+      .bind(JSON.stringify(['100%']), id)
+      .run()
+
+    const response = await SELF.fetch(`https://vev.test/api/clips?tag=${encodeURIComponent('100%')}`, {
+      headers: ACCESS_HEADERS,
+    })
+    const body = await readJson<{ clips: ClipSummary[] }>(response)
+    expect(body.clips.map((clip) => clip.id)).toContain(id)
+  })
+
+  it('matches a tag exactly, not as a substring of a longer one', async () => {
+    const created = await postClip({ ...minimalPayload(), title: 'substring bait' })
+    const { id } = await readJson<{ id: string }>(created)
+    await env.DB.prepare('update clips set tags = ? where id = ?')
+      .bind(JSON.stringify(['kaleidoscope']), id)
+      .run()
+
+    const response = await SELF.fetch('https://vev.test/api/clips?tag=kaleid', { headers: ACCESS_HEADERS })
+    const body = await readJson<{ clips: ClipSummary[] }>(response)
+    expect(body.clips.map((clip) => clip.id)).not.toContain(id)
+  })
+
+  it('answers a tag filter without error for a clip whose tags column is still NULL', async () => {
+    const created = await postClip(minimalPayload())
+    expect(created.status).toBe(201)
+
+    const response = await SELF.fetch('https://vev.test/api/clips?tag=neon', { headers: ACCESS_HEADERS })
+    expect(response.status).toBe(200)
+  })
+
   it('refuses a request with no Access assertion header', async () => {
     const response = await SELF.fetch('https://vev.test/api/clips')
     expect(response.status).toBe(403)
@@ -253,6 +328,16 @@ describe('PATCH /api/clips/:id', () => {
     const { id } = await readJson<{ id: string }>(created)
     const response = await patchClip(id, { deps: { extensions: [] }, id: 'new-id', origin: 'authored' })
     expect(response.status).toBe(400)
+  })
+
+  it('answers an empty patch with the unchanged clip, the way PATCH /api/tracks/:id does', async () => {
+    const created = await postClip(minimalPayload())
+    const { id, title } = await readJson<{ id: string; title: string }>(created)
+
+    const response = await patchClip(id, {})
+    expect(response.status).toBe(200)
+    const body = await readJson<{ title: string }>(response)
+    expect(body.title).toBe(title)
   })
 
   it('answers 404 for an unknown id', async () => {
