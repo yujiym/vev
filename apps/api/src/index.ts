@@ -8,6 +8,7 @@ import * as v from 'valibot'
 import { requireAccessAssertion } from './access.ts'
 import { settingsTable } from './db/schema.ts'
 import type { Env } from './env.ts'
+import { ingestQueue } from './ingest/consume.ts'
 import { clipsRoutes } from './routes/clips.ts'
 import { clipThumbnailRoutes, mediaRoutes } from './routes/media.ts'
 
@@ -47,4 +48,13 @@ export type AppType = typeof withClips
  */
 const app = new Hono<{ Bindings: Env }>().route('/', api).route('/media', mediaRoutes)
 
-export default app
+/**
+ * The Worker exports two handlers, not one. `fetch` serves the API and the SPA; `queue` is the
+ * annotation consumer (§11.1 — annotation is slow, so it runs asynchronously off the `INGEST`
+ * queue that `POST /api/clips` writes to). Both live on the same deployed artifact, which is what
+ * §15.3 requires: one build runs at a venue, whether or not a queue exists there to feed it.
+ */
+export default {
+  fetch: app.fetch,
+  queue: ingestQueue,
+} satisfies ExportedHandler<Env>

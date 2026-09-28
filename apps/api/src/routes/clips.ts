@@ -19,6 +19,7 @@ import * as v from 'valibot'
 
 import { clipsTable } from '../db/clips.ts'
 import type { Env } from '../env.ts'
+import { enqueueAnnotation } from '../ingest/consume.ts'
 
 /** No feedback, no extra outputs, no sources, no audio, no extensions — every engine `analyzeHydra` doesn't cover yet starts here. */
 const EMPTY_DEPS: ClipDeps = {
@@ -108,6 +109,16 @@ export const clipsRoutes = new Hono<{ Bindings: Env }>()
 
     const db = drizzle(c.env.DB)
     await db.insert(clipsTable).values(row)
+
+    // Annotation is asynchronous and MUST NOT block registration (§0 principle 2, §11.1): the row
+    // is already stored and already `annotationStatus: 'pending'`, so a queue that is absent (local
+    // mode, §15.3) or momentarily unavailable leaves a registered, un-annotated clip — the exact
+    // state `pending` exists to describe — rather than failing a registration that has succeeded.
+    try {
+      await enqueueAnnotation(c.env.INGEST, id)
+    } catch (error) {
+      console.error(`clips: could not enqueue annotation for ${id}`, error)
+    }
 
     return c.json(row, 201)
   })

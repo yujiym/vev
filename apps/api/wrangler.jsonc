@@ -64,6 +64,20 @@
   // emulates R2 locally regardless of which real bucket the name matches —
   // so it reuses the top-level name rather than inventing a third bucket.
   "r2_buckets": [{ "binding": "MEDIA", "bucket_name": "vev-media" }],
+  // Workers AI, for annotation (Task 5): `typesafe/jev` answers the typed
+  // questions (score / choice / noul) that make up most of a clip's metadata,
+  // and one small text model writes the single free-text field. Repeated under
+  // `env.preview` for the same reason as everything else here — a named
+  // environment inherits no bindings. NOT repeated under `env.local`: Workers
+  // AI has no local implementation and proxies to the real service even under
+  // miniflare, so local mode (§15.3) runs without it exactly as it runs
+  // without INGEST and VECTORIZE, and `Env.AI` is optional to say so.
+  // NOTE: `typesafe/jev` is a THIRD-PARTY model, billed from prepaid AI
+  // Gateway credits rather than from the Workers Paid plan's neurons. With no
+  // credits on the account the binding still routes and the call is rejected
+  // with `AiGatewayError: 2021: Insufficient AI Gateway credits`, which the
+  // queue consumer records as `annotationStatus: 'failed'`.
+  "ai": { "binding": "AI" },
   "queues": {
     "producers": [{ "binding": "INGEST", "queue": "vev-ingest" }],
     // max_batch_size: 1 — annotation is one clip at a time, not a bulk job.
@@ -141,6 +155,11 @@
         },
       ],
       "r2_buckets": [{ "binding": "MEDIA", "bucket_name": "vev-media-preview" }],
+      // See the top-level `ai` block. Repeated here because a named
+      // environment inherits no bindings; the binding name is identical in
+      // every environment (§15.3), so the Worker never branches on which one
+      // it is running in.
+      "ai": { "binding": "AI" },
       "queues": {
         "producers": [{ "binding": "INGEST", "queue": "vev-ingest-preview" }],
         "consumers": [{ "queue": "vev-ingest-preview", "max_batch_size": 1, "max_retries": 2 }],
