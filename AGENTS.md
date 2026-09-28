@@ -10,7 +10,13 @@ The design describes software that does not exist yet: treat every section as in
 
 Decisions that shaped the code live in [docs/adr/](docs/adr/README.md): read the relevant ADR before revisiting a toolchain, structure or dependency choice, and add a new ADR rather than editing a past one.
 
+How to run the repository, and the gotchas that only surface when you do, live in [docs/runbook.md](docs/runbook.md). Add to it when you find one; that is where an operational finding survives after its plan's working files are deleted.
+
 `.svelte` templates sit outside the type and lint gate (`pnpm check`): oxlint reaches a component's `<script>` block with syntactic rules only, and `svelte-check` — the tool that would type-check templates — cannot run against this repository's TypeScript 7 (see [ADR 0001](docs/adr/0001-vite-plus-toolchain.md)). Keep components thin as a consequence: props in, markup out, logic and types in `.ts` modules the gate can actually check.
+
+## Working files
+
+An in-flight plan keeps its working files under `.superpowers/` — the plan, its progress ledger, briefs, reports and review packages. They are scratch for work in progress: when the work lands, `.superpowers/` is deleted and anything worth keeping has already moved into `docs/` (a decision becomes an ADR, an operational finding becomes a line in the runbook, a design change edits the design document). The root `vite.config.ts` excludes `.superpowers/**` from formatting because plan files carry indented code fragments whose indentation is the instruction.
 
 ## Toolchain
 
