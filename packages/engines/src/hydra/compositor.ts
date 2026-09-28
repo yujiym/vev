@@ -22,8 +22,10 @@ const bufferFor = (synth: HydraSynth, slot: Slot): HydraOutput => (slot === 'a' 
  * `o1` and `o2` are the two clip buffers (slot a and slot b); `o0` is the
  * compositor's own output, which the canvas always shows — set once at `mount()`
  * and never reassigned again, so a transition only ever changes what feeds `o0`,
- * not which buffer is on screen. `o3` is left for clip code to use as scratch
- * (spec §6.1) and the compositor never touches it.
+ * not which buffer is on screen. `o3` is the compositor's own spare buffer —
+ * spec §6.1 calls it "spare (intermediate buffer for transitions, etc.)" —
+ * not clip scratch; M1 doesn't touch it, M6's automatic transitions are
+ * expected to want it.
  *
  * Clip code is compiled with `new Function` over the synth's own keys as
  * parameter names, rather than through Hydra's own `eval()` (which calls

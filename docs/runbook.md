@@ -8,7 +8,7 @@ How to run vev locally and what bites. The design lives in [spec.md](./spec.md);
 
 | Command | What it does |
 | --- | --- |
-| `pnpm install --frozen-lockfile` | Installs; pnpm provisions Node itself. Runs `apps/web`'s `svelte-kit sync` through its `prepare` script. |
+| `pnpm install --frozen-lockfile` | Installs; pnpm provisions Node itself. Has an `apps/web` `prepare` script (`svelte-kit sync`), but pnpm skips lifecycle scripts when install finds nothing to change — verified by moving `.svelte-kit` aside and running install both plain and with `--force`: neither regenerated it. It may still run on a genuinely fresh clone (untested); `pnpm --filter web run prepare` is the step that reliably regenerates it, which is why CI runs it explicitly, right after install. |
 | `pnpm dev` | Development: the SPA on `127.0.0.1:5173` with `/api` proxied to the Worker on `127.0.0.1:8787`. Applies local D1 migrations first. |
 | `pnpm live` | Local mode (§15.3): builds the SPA, applies local D1 migrations, and serves both from the Worker on `127.0.0.1:8787` — the same shape that deploys. |
 | `pnpm check` | Typecheck, lint (oxlint) and format (oxfmt). |
