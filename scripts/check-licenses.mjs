@@ -3,6 +3,10 @@
 // GPL-2.0-only and unknown licences fail. Run: pnpm licenses:check
 import { execFileSync } from 'node:child_process'
 
+// This is exactly the project's stated dependency licence policy (§14.1) —
+// not a superset "to be safe". Add an entry only when a real dependency
+// needs it, and record why it is AGPL-3.0 compatible in the commit that adds
+// it. Do not pre-approve a licence no dependency in the tree actually uses.
 const ALLOWED = new Set([
   '0BSD',
   'AGPL-3.0',
@@ -11,7 +15,6 @@ const ALLOWED = new Set([
   'Apache-2.0',
   'BSD-2-Clause',
   'BSD-3-Clause',
-  'BlueOak-1.0.0',
   'CC0-1.0',
   'GPL-3.0',
   'GPL-3.0-only',
@@ -21,7 +24,6 @@ const ALLOWED = new Set([
   'LGPL-3.0-or-later',
   'MIT',
   'MPL-2.0',
-  'Python-2.0',
   'Unlicense',
 ])
 

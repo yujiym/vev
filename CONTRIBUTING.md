@@ -69,6 +69,12 @@ pnpm licenses:check
 
 `pnpm check` runs type checking, linting (`oxlint`) and format checking (`oxfmt`) together. All four commands must pass locally; a pull request whose branch fails any of them will fail CI.
 
+### What the gate does not cover
+
+`pnpm check`'s type checking and linting run over `.ts` files (and the script blocks of `.svelte` files) with full type-aware rules. It does **not** type-check `.svelte` template expressions or catch `.svelte`-specific type errors: `oxlint` reaches a component's `<script>` block with syntactic rules only, and `svelte-check` — the tool that would cover templates — is deliberately not part of the gate, because it crashes against this repository's TypeScript 7.0.2 and would require carrying a second TypeScript major just to run it.
+
+In practice this means: a type error inside a `<script>` block is caught; a type error in a template expression (`{someProp.typo}`, a mismatched prop, an event handler with the wrong signature) is not caught by CI and will only surface at runtime or in your editor. Write accordingly — keep logic and types in `.ts` modules, keep `.svelte` components thin (props in, markup out), and verify a component you changed by actually running it (`pnpm dev` / `pnpm live`), not by relying on the gate to catch a template mistake.
+
 ## Clips are content, not code
 
 Clips (Hydra / textmode sketches and their metadata) are content and keep their own authors' licenses — they are not part of vev's codebase license. Per §14.2 of `docs/system-design.md`, the repository does **not** ship third-party clips. The only clips that may be included are the vev authors' own examples, under `examples/clips/`, each with its own per-file license header. Do not submit clips written by anyone else, even under a permissive license — they do not belong in this repository.
