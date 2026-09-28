@@ -20,10 +20,28 @@ allowBuilds:
 # real `vite` package, splitting the graph into two structurally similar but
 # nominally distinct Plugin/UserConfig types. Redirecting the peer to the same
 # vite-plus-core release unifies the types.
+#
+# @cloudflare/vitest-pool-workers@0.22.0 pins its own bundled miniflare/workerd
+# to 5.20260815.0-alpha / 1.20260815.1 — older than the compatibility date
+# apps/api's Worker ships with (wrangler.jsonc's compatibility_date). Without
+# these overrides the test harness's bundled runtime can't start a Worker on
+# that date ("newest date supported by this server binary is 2026-08-22"),
+# which would otherwise force the *shipped* compatibility date down to match a
+# *test-only* limitation. Forcing the pool onto the newer miniflare/workerd
+# already resolved elsewhere in the tree (via wrangler's own dependency) lets
+# the Worker's compatibility date stay current. Drop these once
+# @cloudflare/vitest-pool-workers ships a release bundling a newer runtime.
 overrides:
   oxlint: '=1.83.0'
   oxfmt: '=0.68.0'
   vite@*: npm:@voidzero-dev/vite-plus-core@0.3.3
+  miniflare: 5.20260926.0-alpha
+  workerd: 1.20260926.1
+  '@cloudflare/workerd-darwin-64': 1.20260926.1
+  '@cloudflare/workerd-darwin-arm64': 1.20260926.1
+  '@cloudflare/workerd-linux-64': 1.20260926.1
+  '@cloudflare/workerd-linux-arm64': 1.20260926.1
+  '@cloudflare/workerd-windows-64': 1.20260926.1
 minimumReleaseAge: 4320
 minimumReleaseAgeExclude:
   # ultracite@7.12.1 is the version pinned in the Task 1 brief (^7.12.1); it was
