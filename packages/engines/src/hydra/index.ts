@@ -6,4 +6,3 @@
 export { HydraCompositor } from './compositor.ts'
 export type { ProbeFailureReason, ProbeResult } from './probe.ts'
 export { probeClip } from './probe.ts'
-export { framesDiffer, isSentinelFill, SENTINEL_CODE, SENTINEL_RGB } from './sentinel.ts'

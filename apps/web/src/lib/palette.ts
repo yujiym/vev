@@ -60,15 +60,14 @@ export const dominantColours = (
  * Reads `canvas`'s current WebGL drawing buffer synchronously via `gl.readPixels`, for sampling a
  * frame *during* a live `requestAnimationFrame` render loop.
  *
- * This exists as a separate, synchronous alternative to `sampleFrame` because of a real, manually
- * confirmed failure mode (see the M2 task 4 report): a canvas with the (default)
- * `preserveDrawingBuffer: false` only reliably holds its just-drawn content for reads that happen
- * in the SAME synchronous turn as the draw call. `sampleFrame`'s `createImageBitmap` is
- * asynchronous — sampling through it from a `setTimeout` callback running between two animation
- * frames of an ongoing recording reads back all-zero pixels even though the canvas is visibly
- * rendering (confirmed: the recorded WebM itself contains correct frames throughout). Calling this
- * synchronously from inside the same `requestAnimationFrame` callback that just called
- * `compositor.tick()` avoids the gap entirely.
+ * This is synchronous because of a real, manually confirmed failure mode (see the M2 task 4
+ * report): a canvas with the (default) `preserveDrawingBuffer: false` only reliably holds its
+ * just-drawn content for reads that happen in the SAME synchronous turn as the draw call. Sampling
+ * asynchronously — e.g. via `createImageBitmap` from a `setTimeout` callback running between two
+ * animation frames of an ongoing recording — reads back all-zero pixels even though the canvas is
+ * visibly rendering (confirmed: the recorded WebM itself contains correct frames throughout).
+ * Calling this synchronously from inside the same `requestAnimationFrame` callback that just
+ * called `compositor.tick()` avoids the gap entirely.
  */
 export const readCanvasPixelsSync = (canvas: HTMLCanvasElement): SampledFrame => {
   const gl = canvas.getContext('webgl2') ?? canvas.getContext('webgl')

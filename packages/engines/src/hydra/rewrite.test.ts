@@ -22,4 +22,12 @@ describe(rewriteOut, () => {
   it('appends an out() when the clip never calls one', () => {
     expect(rewriteOut('osc(10)', 'b')).toBe('osc(10).out(o2)')
   })
+
+  it('changes nothing when the only out() already names a target', () => {
+    expect(rewriteOut('noise().out(o3)', 'a')).toBe('noise().out(o3)')
+  })
+
+  it('still rewrites a bare out() alongside an earlier named one', () => {
+    expect(rewriteOut('noise().out(o3)\nosc(10).out()', 'a')).toBe('noise().out(o3)\nosc(10).out(o1)')
+  })
 })
