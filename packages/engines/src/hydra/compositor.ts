@@ -121,6 +121,20 @@ export class HydraCompositor {
   }
 
   /**
+   * Resizes the canvas's backing store and every one of Hydra's internal
+   * framebuffers to match, via `Hydra.setResolution` (verified against the
+   * installed 1.4.0 source, `src/hydra-synth.js`). Mutating `canvas.width`/
+   * `height` directly instead — e.g. from a `resize` listener in the output
+   * window's route — would resize the visible canvas but leave `o0`-`o3`
+   * sized for the old resolution, which is exactly the "fullscreen breaks
+   * rendering" failure this method exists to rule out. A no-op before
+   * `mount()`.
+   */
+  resize(width: number, height: number): void {
+    this.hydra?.setResolution(width, height)
+  }
+
+  /**
    * Stop rendering and force the WebGL context to actually release.
    * `autoLoop: false` at construction means Hydra itself never started a
    * `requestAnimationFrame` loop — this instance is only ever advanced by an

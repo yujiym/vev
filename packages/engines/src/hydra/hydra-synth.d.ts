@@ -64,6 +64,15 @@ declare module 'hydra-synth' {
     constructor(options?: HydraOptions)
     readonly regl: ReglInstance
     readonly synth: HydraSynth
+    /**
+     * Resizes the canvas's backing store and every output/source framebuffer to
+     * match, then refreshes regl — confirmed against the installed 1.4.0 source
+     * (`src/hydra-synth.js`'s `setResolution`, also bound onto `synth` itself).
+     * This is the only correct way to resize a mounted instance: mutating
+     * `canvas.width`/`height` directly leaves Hydra's framebuffers sized for the
+     * old resolution.
+     */
+    setResolution: (width: number, height: number) => void
     tick: (dt: number) => void
   }
 }
