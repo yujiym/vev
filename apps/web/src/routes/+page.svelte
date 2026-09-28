@@ -22,6 +22,8 @@
 
 <button onclick={check} type="button">Check API</button>
 
+<p><a href="/studio">Open the studio (debug control panel)</a></p>
+
 {#if health}
   <p>mode: {health.mode} · settings rows: {health.settingsRows} · commit: {health.commit}</p>
 {:else if errorMessage}
