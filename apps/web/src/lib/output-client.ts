@@ -116,12 +116,26 @@ export interface StartOutputOptions {
   createCompositor?: (clock: Clock) => Compositor | Promise<Compositor>
   /** Wall-clock now, per spec: `Date.now()`, never `performance.now()`. */
   now?: () => number
+  /**
+   * Called (no argument — the error itself is always logged via
+   * `console.error` separately, for the console) if building or mounting the
+   * compositor throws: a GL-context failure on an unfamiliar projector is the
+   * realistic case. Exists only so the caller can surface the failure in the
+   * page rather than leaving a silent black rectangle, which §0's "never stop
+   * the show" forbids as much as a crash does. Defaults to a no-op.
+   */
+  onStartupError?: () => void
   /** Schedules one frame. Defaults to `requestAnimationFrame`, adapted to ignore its timestamp argument (`tick` uses `now()` instead — see the module doc above). */
   requestFrame?: (run: () => void) => number
   /** Subscribes to viewport-size changes; returns an unsubscribe function. Defaults to a `window` `'resize'` listener. */
   subscribeResize?: (onResize: (width: number, height: number) => void) => () => void
   /** The initial canvas size. Defaults to the window's current inner size. */
   viewportSize?: () => { height: number; width: number }
+}
+
+/** No caller cared — the error itself is still logged via `console.error` regardless. */
+const noop = (): void => {
+  // Intentionally empty: see doc comment above.
 }
 
 const defaultCreateCompositor = async (clock: Clock): Promise<Compositor> => {
@@ -196,6 +210,7 @@ export const startOutput = (options: StartOutputOptions): (() => void) => {
     channel = new BroadcastChannel(OUTPUT_CHANNEL),
     createCompositor = defaultCreateCompositor,
     now = Date.now,
+    onStartupError = noop,
     requestFrame = defaultRequestFrame,
     subscribeResize = defaultSubscribeResize,
     viewportSize = defaultViewportSize,
@@ -261,19 +276,31 @@ export const startOutput = (options: StartOutputOptions): (() => void) => {
   }
 
   void (async () => {
-    const created = await createCompositor(clock)
-    if (stopped) {
-      // Teardown already ran while the compositor was still loading — dispose
-      // it immediately rather than leaving a mounted, ticking instance behind
-      // that nothing will ever tear down.
-      created.dispose()
-      return
-    }
+    try {
+      const created = await createCompositor(clock)
+      if (stopped) {
+        // Teardown already ran while the compositor was still loading —
+        // dispose it immediately rather than leaving a mounted, ticking
+        // instance behind that nothing will ever tear down.
+        created.dispose()
+        return
+      }
 
-    compositor = created
-    compositor.mount(canvas)
-    sendHello(channel)
-    frame = requestFrame(loop)
+      compositor = created
+      compositor.mount(canvas)
+      sendHello(channel)
+      frame = requestFrame(loop)
+    } catch (error) {
+      // The dynamic `import('@vev/engines/hydra')` or `mount()` can throw —
+      // a GL-context failure on an unfamiliar projector is the realistic
+      // case. Left uncaught, the window would stay black forever with
+      // `sendHello` never firing and nothing logged: exactly the silent
+      // failure §0's "never stop the show" forbids. Log it and hand it to
+      // the caller so the page can say something instead of showing a black
+      // rectangle.
+      console.error('vev: output failed to start', error)
+      onStartupError()
+    }
   })()
 
   return () => {

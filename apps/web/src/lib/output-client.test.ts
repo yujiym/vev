@@ -424,4 +424,34 @@ describe(startOutput, () => {
     expect(compositor.switchTo).toHaveBeenCalledTimes(2)
     expect(compositor.switchTo).toHaveBeenNthCalledWith(2, 'b', resumeFade.transition, 4000)
   })
+
+  it('logs and reports a startup failure instead of leaving a silent black window', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const failure = new Error('GL context creation failed')
+    const scheduler = createFrameScheduler()
+    const canvas = fakeCanvas()
+    const onStartupError = vi.fn<() => void>()
+
+    startOutput({
+      cancelFrame: scheduler.cancelFrame,
+      canvas,
+      channel: new FakeChannel() as unknown as BroadcastChannel,
+      createCompositor: () => {
+        throw failure
+      },
+      onStartupError,
+      requestFrame: scheduler.requestFrame,
+      subscribeResize: noResize,
+      viewportSize: fixedViewport,
+    })
+
+    await vi.waitFor(() => {
+      expect(onStartupError).toHaveBeenCalledOnce()
+    })
+    expect(consoleError).toHaveBeenCalledWith('vev: output failed to start', failure)
+    // No frame is ever scheduled for a compositor that never mounted.
+    expect(scheduler.fire).not.toThrow()
+
+    consoleError.mockRestore()
+  })
 })
