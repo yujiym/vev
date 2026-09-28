@@ -26,7 +26,16 @@ export const nextBarAt = (clock: Clock, now: number): number => {
   return clock.downbeatAt + (barsElapsed + 1) * bar
 }
 
-/** Mean interval between taps, as a tempo. Fewer than two taps say nothing. */
+/**
+ * Mean interval between taps, as a tempo. Fewer than two taps say nothing, and so
+ * does a span that isn't a positive number of milliseconds — two taps on the same
+ * millisecond would otherwise divide by zero into `Infinity`, and an `Infinity` BPM
+ * turns `barDurationMs` into 0, which would spin the scheduler.
+ *
+ * Taps are expected in the order they were made; out-of-order input is rejected
+ * (`undefined`) rather than silently sorted, since a caller producing taps out of
+ * order is a bug worth surfacing, not papering over.
+ */
 export const bpmFromTaps = (taps: number[]): number | undefined => {
   const [first] = taps
   const last = taps.at(-1)
@@ -35,5 +44,15 @@ export const bpmFromTaps = (taps: number[]): number | undefined => {
     return undefined
   }
 
-  return 60_000 / ((last - first) / (taps.length - 1))
+  const isOrdered = taps.every((tap, index) => index === 0 || tap >= taps[index - 1])
+  if (!isOrdered) {
+    return undefined
+  }
+
+  const span = last - first
+  if (!(span > 0)) {
+    return undefined
+  }
+
+  return 60_000 / (span / (taps.length - 1))
 }

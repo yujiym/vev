@@ -96,7 +96,12 @@ describe('playback', () => {
     state = reduce(state, { clipId: 'loud', kind: 'select-next' }, clock)
     state = reduce(state, { kind: 'go', now: 0 }, clock)
     state = reduce(state, { kind: 'tick', now: 2000 }, clock)
+    // Still mid-fade one bar before the two-bar span is up: a fade that completes
+    // early would already show 'loud' here, so this assertion — not just the final
+    // one below — is what a shortened span breaks.
     state = reduce(state, { kind: 'tick', now: 4000 }, clock)
+    expect(state.current.clipId).toBe('quiet')
+    expect(state.fading).toBeDefined()
     state = reduce(state, { kind: 'tick', now: 6000 }, clock)
     expect(state.current).toStrictEqual({ clipId: 'loud', slot: 'b' })
     expect(state.fading).toBeUndefined()

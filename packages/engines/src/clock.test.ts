@@ -28,4 +28,12 @@ describe('bar timing', () => {
     expect(bpmFromTaps([1000])).toBeUndefined()
     expect(bpmFromTaps([])).toBeUndefined()
   })
+
+  it('refuses identical timestamps rather than dividing by zero', () => {
+    expect(bpmFromTaps([1000, 1000])).toBeUndefined()
+  })
+
+  it('refuses taps given out of order rather than silently sorting them', () => {
+    expect(bpmFromTaps([1000, 500, 1500])).toBeUndefined()
+  })
 })
