@@ -1,0 +1,19 @@
+{
+  "name": "@vev/shared",
+  "version": "0.0.0",
+  "private": true,
+  "license": "AGPL-3.0-or-later",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "vp test"
+  },
+  "dependencies": {
+    "valibot": "^1.5.0"
+  },
+  "devDependencies": {
+    "vitest": "^2.1.0"
+  }
+}
