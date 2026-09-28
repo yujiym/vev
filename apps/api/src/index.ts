@@ -11,11 +11,13 @@ import type { Env } from './env.ts'
 
 const app = new Hono<{ Bindings: Env }>().basePath('/api')
 
-// /health is public by design (the smoke test depends on it) and is
-// registered before the guard below, so it never reaches it: Hono composes
-// matched handlers in registration order, and this route's handler doesn't
-// call `next()`. Every other /api/* route added from here on is an owner
-// route and passes through the guard first (§13).
+// Mounted FIRST, ahead of every route (§13). /health is the only public
+// route — it's named explicitly here, not inferred from registration order,
+// so a future owner route stays guarded no matter how it's chained onto
+// `routes` below (see requireAccessAssertion's doc comment for why order
+// alone isn't safe).
+app.use('/*', requireAccessAssertion(new Set(['/api/health'])))
+
 const routes = app.get('/health', async (c) => {
   const db = drizzle(c.env.DB)
   const [row] = await db.select({ value: count() }).from(settingsTable)
@@ -29,12 +31,6 @@ const routes = app.get('/health', async (c) => {
     }),
   )
 })
-
-// Applies to every /api/* route registered after this point (none yet — see
-// the comment above `routes`). Registered after `/health` so it can never
-// run ahead of that handler; must stay registered before any owner route
-// this file gains next (Task 3+).
-app.use('/*', requireAccessAssertion)
 
 export type AppType = typeof routes
 

@@ -6,9 +6,9 @@ import { describe, expect, it } from 'vitest'
 import { requireAccessAssertion } from '../src/access.ts'
 import type { Env } from '../src/env.ts'
 
-const buildApp = () => {
+const buildApp = (publicPaths: ReadonlySet<string> = new Set()) => {
   const app = new Hono<{ Bindings: Env }>()
-  app.use('*', requireAccessAssertion)
+  app.use('*', requireAccessAssertion(publicPaths))
   app.get('/owner-thing', (c) => c.text('ok'))
   return app
 }
@@ -47,6 +47,11 @@ describe('requireAccessAssertion (unit, mounted standalone)', () => {
   it('is disabled in local mode, even with no header', async () => {
     const localEnv = { VEV_MODE: 'local' } as Env
     const response = await buildApp().request('/owner-thing', {}, localEnv)
+    expect(response.status).toBe(200)
+  })
+
+  it('skips a path named in publicPaths, even with no header', async () => {
+    const response = await buildApp(new Set(['/owner-thing'])).request('/owner-thing', {}, cloudEnv)
     expect(response.status).toBe(200)
   })
 })

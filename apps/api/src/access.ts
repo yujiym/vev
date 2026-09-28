@@ -30,17 +30,29 @@ import type { Env } from './env.ts'
  * `VEV_MODE` explicitly, the same way it overrides `GIT_COMMIT`. So this
  * check runs enabled in every `apps/api` test: an owner-route test needs a
  * real (non-blank) `Cf-Access-Jwt-Assertion` header or it 403s.
+ *
+ * Takes the public paths as an argument rather than relying on registration
+ * order. Hono composes matched handlers (both `.use()` and route handlers)
+ * in the order they were registered, so mounting this before `/health` and
+ * trusting `/health`'s handler to never call `next()` would work — until a
+ * route gets chained onto the `AppType`-producing const the same way
+ * `/health` is (`app.get('/health', ...).post('/clips', ...)`), which
+ * registers `/clips` ahead of a guard added afterwards and skips it
+ * entirely. Mounting this FIRST, with an explicit skip set, keeps every
+ * route added after it covered regardless of how it's chained.
  */
-export const requireAccessAssertion: MiddlewareHandler<{ Bindings: Env }> = async (c, next) => {
-  if (c.env.VEV_MODE === 'local') {
+export const requireAccessAssertion =
+  (publicPaths: ReadonlySet<string>): MiddlewareHandler<{ Bindings: Env }> =>
+  async (c, next) => {
+    if (publicPaths.has(c.req.path) || c.env.VEV_MODE === 'local') {
+      await next()
+      return
+    }
+
+    const assertion = c.req.header('Cf-Access-Jwt-Assertion')
+    if (assertion === undefined || assertion.trim() === '') {
+      return c.text('Forbidden', 403)
+    }
+
     await next()
-    return
   }
-
-  const assertion = c.req.header('Cf-Access-Jwt-Assertion')
-  if (assertion === undefined || assertion.trim() === '') {
-    return c.text('Forbidden', 403)
-  }
-
-  await next()
-}
