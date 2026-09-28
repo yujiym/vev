@@ -92,6 +92,15 @@ export default defineConfig({
     ...oxfmtPreset,
     printWidth: 110,
     semi: false,
+    // Top-level, not scoped: oxfmt's formatting worker resolves
+    // `prettier-plugin-svelte` (and therefore `svelte/compiler`) eagerly whenever
+    // this option is set anywhere in the active config, so it used to break
+    // `vp check`/`vp fmt` for the whole repo before any package had installed
+    // `svelte`. Now that apps/web (Task 5) installs `svelte`, the top-level
+    // option resolves fine and is simpler than the file-scoped override it
+    // replaces — confirmed by a deliberately mangled .svelte file: `vp check`
+    // both flags it and leaves the rest of the repo unaffected.
+    svelte: true,
     singleQuote: true,
     trailingComma: 'all',
     // Markdown prose is one paragraph per line; the viewer soft-wraps it, so a
@@ -107,17 +116,6 @@ export default defineConfig({
       '**/.svelte-kit/**',
       '**/build/**',
       '.superpowers/**',
-    ],
-    overrides: [
-      // Scoped rather than a top-level `svelte: true`: oxfmt's formatting worker
-      // resolves `prettier-plugin-svelte` (and therefore `svelte/compiler`) eagerly
-      // whenever the option is set anywhere in the active config, even for a run
-      // that touches zero .svelte files — so a top-level `svelte: true` breaks
-      // `vp check`/`vp fmt` for the whole repo until a package installs `svelte`
-      // (apps/web, Task 5). Scoping it to `**/*.svelte` keeps the same policy
-      // (Svelte components are formatted once they exist) without forcing the
-      // eager load before any .svelte file exists.
-      { files: ['**/*.svelte'], svelte: true },
     ],
   },
 })

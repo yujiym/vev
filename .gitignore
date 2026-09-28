@@ -12,4 +12,8 @@ dist/
 .env
 .env.*
 !.env.example
+# apps/web/.env carries non-secret PUBLIC_* defaults (the AGPL source link's
+# SOURCE_URL/commit, §14.1) rather than credentials, so it is tracked like any
+# other source file, unlike apps/api's .dev.vars.
+!apps/web/.env
 *.log
