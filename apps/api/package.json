@@ -9,18 +9,21 @@
     "live": "wrangler dev --env local --ip 127.0.0.1 --port 8787",
     "deploy": "wrangler deploy",
     "test": "vp test",
+    "db:generate": "drizzle-kit generate",
     "migrate:local": "wrangler d1 migrations apply vev --local",
     "migrate:remote": "wrangler d1 migrations apply vev --remote"
   },
   "dependencies": {
     "@hono/valibot-validator": "^0.6.1",
     "@vev/shared": "workspace:*",
+    "drizzle-orm": "^0.45.3",
     "hono": "^4.13.9",
     "valibot": "^1.5.0"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.22.0",
     "@cloudflare/workers-types": "^5.20260928.1",
+    "drizzle-kit": "^0.31.11",
     "vitest": "4.1.11",
     "wrangler": "^4.142.0"
   }

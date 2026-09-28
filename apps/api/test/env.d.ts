@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
+import type { D1Migration } from 'cloudflare:test'
+
 import type { Env as WorkerEnv } from '../src/env.ts'
 
 // Older @cloudflare/vitest-pool-workers releases exposed a `ProvidedEnv`
@@ -13,7 +15,9 @@ import type { Env as WorkerEnv } from '../src/env.ts'
 // declares.
 declare global {
   namespace Cloudflare {
-    // oxlint-disable-next-line typescript/no-empty-object-type, typescript/no-empty-interface -- declaration-merging pattern for augmenting the ambient Cloudflare.Env namespace; it has no members of its own by design
-    interface Env extends WorkerEnv {}
+    interface Env extends WorkerEnv {
+      /** Bound in vite.config.ts from the migrations directory; not a runtime binding. */
+      TEST_MIGRATIONS: D1Migration[]
+    }
   }
 }

@@ -10,6 +10,15 @@
     "SOURCE_URL": "https://github.com/oboroxyz/vev",
     "VEV_MODE": "cloud",
   },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "vev",
+      // Filled by `pnpm setup` (M12). Until then, only `--local` works.
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "migrations",
+    },
+  ],
   "env": {
     // `--env local` is local mode (§15.3) and never deploys: it takes no routes
     // and no custom domain.
@@ -18,6 +27,15 @@
         "SOURCE_URL": "https://github.com/oboroxyz/vev",
         "VEV_MODE": "local",
       },
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "vev",
+          // Filled by `pnpm setup` (M12). Until then, only `--local` works.
+          "database_id": "00000000-0000-0000-0000-000000000000",
+          "migrations_dir": "migrations",
+        },
+      ],
     },
   },
 }
