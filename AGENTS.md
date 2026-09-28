@@ -32,7 +32,7 @@ Write code, comments, documentation, specifications, and plans in English. Japan
 These rules apply from the first source file, because they are hard to retrofit:
 
 - Every `package.json` carries `"license": "AGPL-3.0-or-later"`.
-- Every source file starts with `// SPDX-License-Identifier: AGPL-3.0-or-later` (or the comment syntax of its language).
+- Every authored file whose format supports comments starts with `// SPDX-License-Identifier: AGPL-3.0-or-later` (or the comment syntax of its language), excluding the JSON family (`.json`, `.jsonc`) — `package.json` carries the `license` field instead, `tsconfig.json` and friends stay parseable by strict `JSON.parse`-based tooling, and the repository-wide `LICENSE` file covers them.
 - Add only dependencies under licenses compatible with AGPL-3.0 (MIT, BSD, Apache-2.0, ISC, MPL-2.0, LGPL, GPL-3.0, AGPL-3.0). GPL-2.0-only and unknown licenses do not qualify.
 - Clips are content, not vev's code: `license`, `commercialOk`, `author`, `sourceUrl`, and `modified` are mandatory on every clip, and the original license header is preserved in `originalCode`. See §14.
 

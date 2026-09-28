@@ -20,7 +20,11 @@ import { defineConfig } from 'vite-plus'
 export default defineConfig({
   lint: {
     extends: [core, antiSlop, vitest],
-    ignorePatterns: ['**/worker-configuration.d.ts', '**/.svelte-kit/**', '**/build/**'],
+    // .superpowers/** is excluded: plan files under it embed indented code
+    // fragments meant to be pasted into an existing block (a describe body, an
+    // interface), and linting/formatting each fenced block as a standalone file
+    // would flag or rewrite that deliberate indentation.
+    ignorePatterns: ['**/worker-configuration.d.ts', '**/.svelte-kit/**', '**/build/**', '.superpowers/**'],
     options: {
       typeAware: true,
       typeCheck: true,
@@ -88,7 +92,17 @@ export default defineConfig({
     // Markdown prose is one paragraph per line; the viewer soft-wraps it, so a
     // reworded sentence diffs as one line rather than a reflowed block.
     proseWrap: 'never',
-    ignorePatterns: [...(oxfmtPreset.ignorePatterns ?? []), '**/.svelte-kit/**', '**/build/**'],
+    // .superpowers/** is excluded: plan files under it embed indented code
+    // fragments meant to be pasted into an existing block (a describe body, an
+    // interface), and formatting each fenced block as a standalone file
+    // dedents that deliberate indentation, turning a paste-in fragment into
+    // what reads as top-level code.
+    ignorePatterns: [
+      ...(oxfmtPreset.ignorePatterns ?? []),
+      '**/.svelte-kit/**',
+      '**/build/**',
+      '.superpowers/**',
+    ],
     overrides: [
       // Scoped rather than a top-level `svelte: true`: oxfmt's formatting worker
       // resolves `prettier-plugin-svelte` (and therefore `svelte/compiler`) eagerly
