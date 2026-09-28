@@ -163,6 +163,26 @@ export class HydraCompositor {
     this.lastTickAt = undefined
   }
 
+  /**
+   * Reads back `slot`'s own buffer (`o1` for `a`, `o2` for `b`) directly from its regl
+   * framebuffer — not the canvas, which `composeIdle()` may have re-hooked to a different slot,
+   * a blend, or simply re-rendered content whose default varies over time. `ReglInstance.read()`
+   * is synchronous — a real GPU sync, like `dispose()`'s `_gl` escape hatch — so this cannot
+   * return a stale or partially-drawn result.
+   *
+   * Exists for the validation probe's sentinel technique (`probe.ts`): fill this slot with a
+   * colour no clip produces by accident, tick, read it back to confirm the fill took, then run
+   * the actual clip and read again — if the two reads are identical, the clip wrote nothing to
+   * its own buffer, regardless of what the composed canvas happens to show. Sampling the canvas
+   * instead would let `composeIdle()`'s own behaviour (which slot it re-hooks, and when) answer
+   * the question instead of the clip's code.
+   */
+  readSlotPixels(slot: Slot): Uint8Array {
+    const synth = this.requireSynth()
+    const hydra = this.requireHydra()
+    return hydra.regl.read({ framebuffer: bufferFor(synth, slot).getCurrent() })
+  }
+
   private composeIdle(): void {
     const synth = this.requireSynth()
     synth.src(bufferFor(synth, this.currentSlot)).out(synth.o0)
@@ -198,5 +218,12 @@ export class HydraCompositor {
       throw new Error('HydraCompositor: mount() must be called before use.')
     }
     return this.synth
+  }
+
+  private requireHydra(): Hydra {
+    if (!this.hydra) {
+      throw new Error('HydraCompositor: mount() must be called before use.')
+    }
+    return this.hydra
   }
 }

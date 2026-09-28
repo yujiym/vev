@@ -3,8 +3,25 @@
 // the compositor actually uses, established against the real 1.4.0 API (§17 spike).
 
 declare module 'hydra-synth' {
-  /** An opaque Hydra render target (`o0`..`o3`). Never introspected, only passed between calls. */
+  /**
+   * An opaque regl framebuffer — the ping-ponged render target behind one `HydraOutput`'s
+   * `getCurrent()`. Never introspected, only passed to `ReglInstance.read()`; the unused optional
+   * `never` field exists only so this is a distinct nominal type rather than a bare `object`.
+   */
+  export interface ReglFramebuffer {
+    readonly __reglFramebuffer?: never
+  }
+
+  /** An opaque Hydra render target (`o0`..`o3`). Never introspected beyond `getCurrent()`. */
   export interface HydraOutput {
+    /**
+     * The framebuffer this output most recently rendered into (confirmed against the installed
+     * 1.4.0 source, `src/output.js`: each output ping-pongs between two fbos, flipping which one
+     * is "current" on every `.out()` draw call). Used by the validation probe's sentinel
+     * technique (`probe.ts`) to read a slot's own buffer directly, bypassing the canvas — see
+     * that module for why sampling the composed canvas instead gives the wrong answer.
+     */
+    getCurrent: () => ReglFramebuffer
     readonly label: string
   }
 
@@ -58,6 +75,12 @@ declare module 'hydra-synth' {
   export interface ReglInstance {
     readonly _gl: WebGLRenderingContext
     destroy: () => void
+    /**
+     * Synchronously reads back RGBA pixels from `options.framebuffer` (confirmed against the
+     * installed regl 1.7.0 source, `dist/regl.js`'s `readPixelsFBO`/`readPixelsImpl`) — a real
+     * GPU sync, and the primitive the probe's sentinel technique reads a clip's own buffer with.
+     */
+    read: (options: { readonly framebuffer: ReglFramebuffer }) => Uint8Array
   }
 
   export default class Hydra {

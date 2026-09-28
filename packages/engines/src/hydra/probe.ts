@@ -1,9 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
+import type { Slot } from '@vev/shared'
+
 import type { Clock } from '../clock.ts'
 import { HydraCompositor } from './compositor.ts'
-import { framesDiffer } from './frame-diff.ts'
+import { framesDiffer, isSentinelFill, SENTINEL_CODE } from './sentinel.ts'
 
-/** How many ticks the probe advances before sampling — enough for a `.out()` chain to settle past its first (often still-clearing) frame. */
+/** The slot the probe always runs a clip in — matches the show's slot `a` (spec §6.1). */
+const PROBE_SLOT: Slot = 'a'
+
+/** How many ticks the probe advances the real clip before sampling — enough for a `.out()` chain to settle past its first (often still-clearing) frame. */
 const PROBE_FRAMES = 6
 
 /** Milliseconds of wall-clock advanced per probed tick — a nominal 30fps, independent of the caller's real frame rate. */
@@ -29,27 +34,6 @@ export type ProbeResult =
       readonly reason: ProbeFailureReason
     }
 
-const sampleCanvas = async (canvas: HTMLCanvasElement): Promise<Uint8ClampedArray> => {
-  const bitmap = await createImageBitmap(canvas)
-  try {
-    const offscreen = new OffscreenCanvas(bitmap.width, bitmap.height)
-    const ctx = offscreen.getContext('2d')
-    if (!ctx) {
-      throw new Error('probeClip: could not obtain a 2d context to sample the canvas.')
-    }
-    ctx.drawImage(bitmap, 0, 0)
-    return ctx.getImageData(0, 0, bitmap.width, bitmap.height).data
-  } finally {
-    bitmap.close()
-  }
-}
-
-/** The WebGL context regl/Hydra already created on `canvas`, however it was requested. `getContext` with a matching type returns the SAME context, not a new one. */
-const existingGlContext = (
-  canvas: HTMLCanvasElement,
-): WebGL2RenderingContext | WebGLRenderingContext | null =>
-  canvas.getContext('webgl2') ?? canvas.getContext('webgl')
-
 /**
  * Runs a clip through the ordinary render path and reports whether it clears spec §11.2's gate:
  * compiles, renders without errors, is not a black frame, holds its frame budget.
@@ -65,47 +49,57 @@ const existingGlContext = (
  * canvas (see the registration page, which disposes the compositor immediately after use, per
  * spec §6.5's cap on live WebGL contexts).
  *
- * The black-frame check (`framesDiffer`, `frame-diff.ts`) samples the canvas right after `mount()`
- * as a baseline, before the clip has run at all, then again after loading, switching in, and
- * ticking it — and fails only if the two samples are identical. See that module for why this
- * replaced an earlier variance-only check that rejected legitimately uniform clips.
+ * **The black-frame check is a sentinel, not a baseline comparison.** Before the clip ever runs,
+ * the probe fills the slot's own buffer with `SENTINEL_CODE` — a colour no clip produces by
+ * accident — ticks once, and confirms with `isSentinelFill` that the fill actually took (a
+ * failed confirmation is a `render-error`, not a black frame: nothing about the clip has been
+ * tested yet). Only then does it load and run the real clip and sample the same buffer again
+ * (`HydraCompositor.readSlotPixels`, not the canvas) via `framesDiffer`: if the buffer still
+ * equals the sentinel, the clip wrote nothing to it and the probe fails; any other result —
+ * including a legitimate solid black or solid white clip — passes. See `sentinel.ts` for why an
+ * earlier baseline-comparison version of this check was wrong (it could both reject a legitimate
+ * uniform clip and accept a clip that rendered nothing).
  *
- * The frame-budget loop forces a real GPU sync (`gl.readPixels` of a single pixel) after every
- * tick. `compositor.tick()` only queues regl draw calls — a GPU driver is free to accept a queued
- * command near-instantly and do the actual work later, so timing `tick()` alone measures
- * submission cost, not render cost, and can never catch an expensive clip. `readPixels` cannot
- * return a correct result until every draw call that could affect the read region has actually
- * finished, which is exactly the synchronisation point the budget check needs.
+ * **The frame-budget loop forces a real GPU sync.** `compositor.tick()` only queues regl draw
+ * calls — a GPU driver is free to accept a queued command near-instantly and do the actual work
+ * later, so timing `tick()` alone measures submission cost, not render cost, and could never
+ * catch an expensive clip. `readSlotPixels` cannot return a correct result until every draw call
+ * that could affect the read region has actually finished, so calling it once per tick (its
+ * result otherwise unused here) is exactly the synchronisation point the budget check needs.
  */
-export const probeClip = async (code: string, canvas: HTMLCanvasElement): Promise<ProbeResult> => {
+const runProbe = (code: string, canvas: HTMLCanvasElement): ProbeResult => {
   const clock: Clock = { beatsPerBar: 4, bpm: 120, downbeatAt: Date.now() }
   const compositor = new HydraCompositor(clock)
 
-  let baseline: Uint8ClampedArray
+  let sentinel: Uint8Array
   try {
     compositor.mount(canvas)
-    baseline = await sampleCanvas(canvas)
+    compositor.load(PROBE_SLOT, SENTINEL_CODE)
+    compositor.tick(Date.now())
+    sentinel = compositor.readSlotPixels(PROBE_SLOT)
   } catch (error) {
     compositor.dispose()
     return { error, ok: false, reason: 'render-error' }
   }
 
+  if (!isSentinelFill(sentinel)) {
+    compositor.dispose()
+    return { ok: false, reason: 'render-error' }
+  }
+
   try {
-    compositor.load('a', code)
+    compositor.load(PROBE_SLOT, code)
   } catch (error) {
     compositor.dispose()
     return { error, ok: false, reason: 'compile-error' }
   }
 
   try {
-    compositor.switchTo('a', { bars: 0, kind: 'cut' }, Date.now())
+    compositor.switchTo(PROBE_SLOT, { bars: 0, kind: 'cut' }, Date.now())
   } catch (error) {
     compositor.dispose()
     return { error, ok: false, reason: 'render-error' }
   }
-
-  const gl = existingGlContext(canvas)
-  const syncPixel = new Uint8Array(4)
 
   let maxFrameMs = 0
   try {
@@ -113,9 +107,7 @@ export const probeClip = async (code: string, canvas: HTMLCanvasElement): Promis
     for (let i = 0; i < PROBE_FRAMES; i += 1) {
       const start = performance.now()
       compositor.tick(now)
-      if (gl) {
-        gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, syncPixel)
-      }
+      compositor.readSlotPixels(PROBE_SLOT)
       const frameMs = performance.now() - start
       if (frameMs > maxFrameMs) {
         maxFrameMs = frameMs
@@ -132,9 +124,9 @@ export const probeClip = async (code: string, canvas: HTMLCanvasElement): Promis
     return { maxFrameMs, ok: false, reason: 'budget-exceeded' }
   }
 
-  let after: Uint8ClampedArray
+  let after: Uint8Array
   try {
-    after = await sampleCanvas(canvas)
+    after = compositor.readSlotPixels(PROBE_SLOT)
   } catch (error) {
     compositor.dispose()
     return { error, ok: false, reason: 'render-error' }
@@ -142,9 +134,19 @@ export const probeClip = async (code: string, canvas: HTMLCanvasElement): Promis
 
   compositor.dispose()
 
-  if (!framesDiffer(baseline, after)) {
+  if (!framesDiffer(sentinel, after)) {
     return { maxFrameMs, ok: false, reason: 'black-frame' }
   }
 
   return { maxFrameMs, ok: true }
 }
+
+/**
+ * Thin `Promise` wrapper around `runProbe`. Everything `runProbe` does — mounting, loading,
+ * ticking, and reading pixels back via `HydraCompositor.readSlotPixels` (a real, synchronous GPU
+ * sync, see its doc comment) — is synchronous; `probeClip` stays `Promise`-returning because that
+ * is its documented public contract (a probe caller should not need to know that this particular
+ * implementation happens not to await anything).
+ */
+export const probeClip = async (code: string, canvas: HTMLCanvasElement): Promise<ProbeResult> =>
+  await Promise.resolve(runProbe(code, canvas))
