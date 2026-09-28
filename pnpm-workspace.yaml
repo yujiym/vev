@@ -30,3 +30,17 @@ minimumReleaseAgeExclude:
   # published within the minimumReleaseAge window at install time, so it must be
   # excluded explicitly rather than lowering the global cutoff.
   - ultracite@7.12.1
+  # The apps/api Task 3 brief pins wrangler@^4.142.0 and
+  # @cloudflare/workers-types@^5.20260928.1; both, and the workerd/miniflare
+  # releases wrangler pulls in transitively, were published within the
+  # minimumReleaseAge window at install time, so they must be excluded
+  # explicitly rather than lowering the global cutoff.
+  - wrangler@4.142.0
+  - '@cloudflare/workers-types@5.20260928.1'
+  - workerd@1.20260926.1
+  - '@cloudflare/workerd-darwin-64@1.20260926.1'
+  - '@cloudflare/workerd-darwin-arm64@1.20260926.1'
+  - '@cloudflare/workerd-linux-64@1.20260926.1'
+  - '@cloudflare/workerd-linux-arm64@1.20260926.1'
+  - '@cloudflare/workerd-windows-64@1.20260926.1'
+  - miniflare@5.20260926.0-alpha

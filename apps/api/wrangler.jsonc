@@ -1,0 +1,30 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "vev",
+  "main": "src/index.ts",
+  // @cloudflare/vitest-pool-workers@0.22.0 pins its own bundled
+  // miniflare/workerd to 5.20260815.0-alpha / 1.20260815.1, whose newest
+  // supported compatibility date is 2026-08-22 — the test worker refuses to
+  // start above that ("newest date supported by this server binary is
+  // 2026-08-22"). Pinned to that ceiling so the pool's test runtime can
+  // start; raise to 2026-09-01 or later once the pool's own miniflare pin
+  // catches up.
+  "compatibility_date": "2026-08-22",
+  "compatibility_flags": ["nodejs_compat"],
+  // SOURCE_URL is the AGPL §13 source offer (§14.1). A self-hoster who modifies
+  // vev points this at their own fork.
+  "vars": {
+    "SOURCE_URL": "https://github.com/oboroxyz/vev",
+    "VEV_MODE": "cloud",
+  },
+  "env": {
+    // `--env local` is local mode (§15.3) and never deploys: it takes no routes
+    // and no custom domain.
+    "local": {
+      "vars": {
+        "SOURCE_URL": "https://github.com/oboroxyz/vev",
+        "VEV_MODE": "local",
+      },
+    },
+  },
+}

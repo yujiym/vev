@@ -1,0 +1,27 @@
+{
+  "name": "api",
+  "version": "0.0.0",
+  "private": true,
+  "license": "AGPL-3.0-or-later",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev --env local --ip 127.0.0.1 --port 8787",
+    "live": "wrangler dev --env local --ip 127.0.0.1 --port 8787",
+    "deploy": "wrangler deploy",
+    "test": "vp test",
+    "migrate:local": "wrangler d1 migrations apply vev --local",
+    "migrate:remote": "wrangler d1 migrations apply vev --remote"
+  },
+  "dependencies": {
+    "@hono/valibot-validator": "^0.6.1",
+    "@vev/shared": "workspace:*",
+    "hono": "^4.13.9",
+    "valibot": "^1.5.0"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.22.0",
+    "@cloudflare/workers-types": "^5.20260928.1",
+    "vitest": "4.1.11",
+    "wrangler": "^4.142.0"
+  }
+}

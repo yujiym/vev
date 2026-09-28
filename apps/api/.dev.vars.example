@@ -1,0 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copy to .dev.vars. Required in local mode (§15.3): without it, provider secrets
+# copied by `sync:pull` cannot be decrypted.
+SETTINGS_ENCRYPTION_KEY=dev-only-not-a-real-key
