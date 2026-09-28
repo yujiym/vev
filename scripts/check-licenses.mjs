@@ -9,6 +9,11 @@ import { execFileSync } from 'node:child_process'
 // it. Do not pre-approve a licence no dependency in the tree actually uses.
 const ALLOWED = new Set([
   '0BSD',
+  // `hydra-synth` spells its licence field `AGPL`, which is not a valid SPDX id.
+  // Its LICENSE file is AGPL Version 3 (verified 2026-09-28 in ojack/hydra-synth),
+  // which is the licence this whole repository is under. The spelling is the only
+  // irregularity, so the exact string is allowed rather than the comparison loosened.
+  'AGPL',
   'AGPL-3.0',
   'AGPL-3.0-only',
   'AGPL-3.0-or-later',
