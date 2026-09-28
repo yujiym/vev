@@ -8,6 +8,10 @@ Guidance for AI coding agents working in this repository.
 
 The design describes software that does not exist yet: treat every section as intent, and the repository as the authority on what is built. Keep `docs/system-design.md` current when a decision changes the design — the root name `DESIGN.md` is reserved for design principles, so this document stays under `docs/`.
 
+Decisions that shaped the code live in [docs/adr/](docs/adr/README.md): read the relevant ADR before revisiting a toolchain, structure or dependency choice, and add a new ADR rather than editing a past one.
+
+`.svelte` templates sit outside the type and lint gate (`pnpm check`): oxlint reaches a component's `<script>` block with syntactic rules only, and `svelte-check` — the tool that would type-check templates — cannot run against this repository's TypeScript 7 (see [ADR 0001](docs/adr/0001-vite-plus-toolchain.md)). Keep components thin as a consequence: props in, markup out, logic and types in `.ts` modules the gate can actually check.
+
 ## Toolchain
 
 Vite+ (`vp`) drives tests, lint (oxlint) and format (oxfmt) from the root `vite.config.ts`, which holds the whole lint and fmt policy; read its header before changing a rule. Package-level `vite.config.ts` files configure that package's dev server, build and test environment.

@@ -54,7 +54,7 @@ This runs `scripts/check-licenses.mjs`, which reads `pnpm licenses list --prod -
 
 ## Validation library
 
-Runtime input validation (request bodies, environment values, clip and track schemas) uses [Valibot](https://valibot.dev/) (ADR 0003 records the rationale behind that choice, once the `docs/adr/` directory exists). Read Valibot's documentation before adding or changing a schema in `packages/shared` or in an API route.
+Runtime input validation (request bodies, environment values, clip and track schemas) uses [Valibot](https://valibot.dev/) ([ADR 0003](docs/adr/0003-valibot-for-validation.md) records the rationale behind that choice). Read Valibot's documentation before adding or changing a schema in `packages/shared` or in an API route.
 
 ## Local gate
 
