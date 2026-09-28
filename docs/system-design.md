@@ -17,8 +17,8 @@ vev is a web app for live VJ performance that chains saved visual clips (Hydra /
 
 - License: **AGPL-3.0-or-later** for the whole monorepo (see §14.1)
 - Free and open source; no hosted multi-tenant service. **Each user self-hosts vev on their own Cloudflare account.**
-- Repository: GitHub organization `oboroxyz` (`oboroxyz/vev`)
-- Official site: **https://vev.oboro.xyz** — docs, demo tracks (read-only), setup guide. It is the upstream author's own deployment, not a shared service; `SOURCE_URL` defaults to the upstream repository.
+- Repository: GitHub account `yujiym` (`yujiym/vev`) — a personal project, not a company one
+- Official site: **https://vev.0x7.sh** — docs, demo tracks (read-only), setup guide. It is the upstream author's own deployment, not a shared service; `SOURCE_URL` defaults to the upstream repository.
 
 ### Design principles
 

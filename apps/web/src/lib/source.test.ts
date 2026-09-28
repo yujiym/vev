@@ -5,19 +5,19 @@ import { resolveSourceLink, sourceCommitUrl } from './source.ts'
 
 describe(sourceCommitUrl, () => {
   it('points at the exact commit being served', () => {
-    expect(sourceCommitUrl('https://github.com/oboroxyz/vev', 'abc1234')).toBe(
-      'https://github.com/oboroxyz/vev/tree/abc1234',
+    expect(sourceCommitUrl('https://example.com/acme/vev', 'abc1234')).toBe(
+      'https://example.com/acme/vev/tree/abc1234',
     )
   })
 
   it('tolerates a trailing slash on the source url', () => {
-    expect(sourceCommitUrl('https://github.com/oboroxyz/vev/', 'abc1234')).toBe(
-      'https://github.com/oboroxyz/vev/tree/abc1234',
+    expect(sourceCommitUrl('https://example.com/acme/vev/', 'abc1234')).toBe(
+      'https://example.com/acme/vev/tree/abc1234',
     )
   })
 
   it('falls back to the repository root when the commit is unknown', () => {
-    expect(sourceCommitUrl('https://github.com/oboroxyz/vev', 'dev')).toBe('https://github.com/oboroxyz/vev')
+    expect(sourceCommitUrl('https://example.com/acme/vev', 'dev')).toBe('https://example.com/acme/vev')
   })
 })
 

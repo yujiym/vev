@@ -23,7 +23,7 @@
   // vev points this at their own fork.
   "vars": {
     "GIT_COMMIT": "dev",
-    "SOURCE_URL": "https://github.com/oboroxyz/vev",
+    "SOURCE_URL": "https://github.com/yujiym/vev",
     "VEV_MODE": "cloud",
   },
   "d1_databases": [
@@ -46,7 +46,7 @@
       // repeated; `assets` is intentionally omitted.
       "vars": {
         "GIT_COMMIT": "dev",
-        "SOURCE_URL": "https://github.com/oboroxyz/vev",
+        "SOURCE_URL": "https://github.com/yujiym/vev",
         "VEV_MODE": "local",
       },
       "d1_databases": [
