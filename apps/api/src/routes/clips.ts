@@ -113,13 +113,34 @@ export const clipsRoutes = new Hono<{ Bindings: Env }>()
   })
   .get('/', async (c) => {
     const db = drizzle(c.env.DB)
-    const engineParam = v.safeParse(engineKindSchema, c.req.query('engine'))
+    const engineParam = c.req.query('engine')
     const reviewedParam = c.req.query('reviewed')
     const tagParam = c.req.query('tag')
 
+    // Absence means "no filter" and must keep working; a present-but-unparseable value is a 400
+    // naming the parameter and what it accepts — silently dropping the condition would make
+    // `?engine=hydraa` behave exactly like no filter at all and return the whole library, which
+    // reads as success both in the library UI and to an API client.
+    let engineFilter: Clip['engine'] | undefined
+    if (engineParam !== undefined) {
+      const parsed = v.safeParse(engineKindSchema, engineParam)
+      if (!parsed.success) {
+        return c.text(`engine must be one of "hydra", "textmode", "isf"; got "${engineParam}"`, 400)
+      }
+      engineFilter = parsed.output
+    }
+
+    let reviewedFilter: boolean | undefined
+    if (reviewedParam !== undefined) {
+      if (reviewedParam !== 'true' && reviewedParam !== 'false') {
+        return c.text(`reviewed must be "true" or "false"; got "${reviewedParam}"`, 400)
+      }
+      reviewedFilter = reviewedParam === 'true'
+    }
+
     const conditions = [
-      engineParam.success ? eq(clipsTable.engine, engineParam.output) : undefined,
-      reviewedParam === undefined ? undefined : eq(clipsTable.reviewed, reviewedParam === 'true'),
+      engineFilter === undefined ? undefined : eq(clipsTable.engine, engineFilter),
+      reviewedFilter === undefined ? undefined : eq(clipsTable.reviewed, reviewedFilter),
       tagParam === undefined ? undefined : like(clipsTable.tags, `%"${tagParam}"%`),
     ].filter((condition) => condition !== undefined)
 

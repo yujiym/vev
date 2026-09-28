@@ -104,6 +104,21 @@ describe('GET /api/clips', () => {
     expect(includedBody.clips[0]?.engine).toBe('hydra')
   })
 
+  it('rejects an unparseable engine filter with a 400 naming the parameter', async () => {
+    const response = await SELF.fetch('https://vev.test/api/clips?engine=hydraa', {
+      headers: ACCESS_HEADERS,
+    })
+    expect(response.status).toBe(400)
+    const text = await response.text()
+    expect(text).toContain('engine')
+  })
+
+  it('treats an absent engine filter as no filter, not an error', async () => {
+    await postClip(minimalPayload())
+    const response = await SELF.fetch('https://vev.test/api/clips', { headers: ACCESS_HEADERS })
+    expect(response.status).toBe(200)
+  })
+
   it('filters by reviewed, excluding a reviewed=true clip and keeping the unreviewed default', async () => {
     await postClip(minimalPayload())
     const excluded = await SELF.fetch('https://vev.test/api/clips?reviewed=true', {
@@ -118,6 +133,21 @@ describe('GET /api/clips', () => {
     const includedBody = await readJson<{ clips: ClipSummary[] }>(included)
     expect(includedBody.clips.every((clip) => !clip.reviewed)).toBe(true)
     expect(includedBody.clips.length).toBeGreaterThan(0)
+  })
+
+  it('rejects an unparseable reviewed filter with a 400 naming the parameter, rather than quietly meaning false', async () => {
+    const response = await SELF.fetch('https://vev.test/api/clips?reviewed=banana', {
+      headers: ACCESS_HEADERS,
+    })
+    expect(response.status).toBe(400)
+    const text = await response.text()
+    expect(text).toContain('reviewed')
+  })
+
+  it('treats an absent reviewed filter as no filter, not an error', async () => {
+    await postClip(minimalPayload())
+    const response = await SELF.fetch('https://vev.test/api/clips', { headers: ACCESS_HEADERS })
+    expect(response.status).toBe(200)
   })
 
   it('filters by tag, matching a clip carrying it and excluding one that does not', async () => {
