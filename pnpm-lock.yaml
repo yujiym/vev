@@ -41,6 +41,9 @@ importers:
       '@hono/valibot-validator':
         specifier: ^0.6.1
         version: 0.6.1(hono@4.13.9)(valibot@1.5.0(typescript@7.0.2))
+      '@vev/engines':
+        specifier: workspace:*
+        version: link:../../packages/engines
       '@vev/ingest':
         specifier: workspace:*
         version: link:../../packages/ingest
@@ -122,6 +125,9 @@ importers:
 
   packages/ingest:
     dependencies:
+      '@vev/engines':
+        specifier: workspace:*
+        version: link:../engines
       '@vev/shared':
         specifier: workspace:*
         version: link:../shared

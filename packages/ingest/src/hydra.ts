@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
+import { countOutCalls, outCallTargets } from '@vev/engines'
 import type { ClipDeps, SourceReq } from '@vev/shared'
 
-const OUTPUT_RE = /\.out\(\s*(?<value>o[0-3])\s*\)/gu
 const FEEDBACK_RE = /\bsrc\(\s*o0\s*\)/u
 const AUDIO_RE = /\ba\.[a-zA-Z]/u
 const LOAD_SCRIPT_RE = /\bloadScript\(\s*['"](?<value>[^'"]+)['"]/gu
@@ -40,11 +40,19 @@ const uniqueMatches = (code: string, re: RegExp): string[] => [
  * audio reactivity (`a.fft` etc.) and external scripts it loads via `loadScript`. Purely textual: no
  * DOM, no Hydra instance, no Worker APIs, so it runs the same in the browser and the Worker (§11.1).
  *
- * `isolated` follows directly from `outputsUsed`: a clip that targets more than one output buffer
- * needs its own Hydra instance (§6.1) and cannot share the compositor's.
+ * Output calls are read with `@vev/engines`'s scanner (`countOutCalls` / `outCallTargets`), never
+ * with a regex of this module's own. There is exactly one answer to "which buffers does this clip
+ * name", and `probeClip` and `POST /api/clips` refuse a multi-output clip from that same answer —
+ * a second implementation here would only mean a clip could pass the gate counted one way and be
+ * stored counted another (which it did: a `.out(` inside a line comment was counted, and one
+ * written `. out (o3)` was missed).
+ *
+ * `isolated` follows from the CALL COUNT, not from `outputsUsed`'s length: two bare `.out()` calls
+ * name no buffer at all and still need their own Hydra instance (§6.1), because a clip may write
+ * only the one buffer its slot owns.
  */
 export const analyzeHydra = (code: string): ClipDeps & { isolated: boolean } => {
-  const outputsUsed = uniqueMatches(code, OUTPUT_RE)
+  const outputsUsed = [...new Set(outCallTargets(code))]
   const sourcesUsed = [
     ...new Set(
       [...code.matchAll(SOURCE_INIT_RE)]
@@ -58,7 +66,7 @@ export const analyzeHydra = (code: string): ClipDeps & { isolated: boolean } => 
 
   return {
     extensions,
-    isolated: outputsUsed.length > 1,
+    isolated: countOutCalls(code) > 1,
     outputsUsed,
     sourcesUsed,
     usesAudio: AUDIO_RE.test(code),

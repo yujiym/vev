@@ -63,15 +63,34 @@ describe('POST /api/clips', () => {
     expect(response.status).toBe(400)
   })
 
-  it('computes deps and isolated from the code, marking a two-output clip isolated', async () => {
+  it('refuses a two-output clip with a 400 telling the author what to change, and stores nothing', async () => {
     const response = await postClip({
       ...minimalPayload(),
       code: 'osc(10).out(o1)\nnoise(3).out(o2)',
+      title: 'two outputs',
+    })
+    expect(response.status).toBe(400)
+    await expect(response.text()).resolves.toMatch(/single .out\(/u)
+    const row = await env.DB.prepare('select count(*) as n from clips where title = ?')
+      .bind('two outputs')
+      .first<{ n: number }>()
+    expect(row?.n).toBe(0)
+  })
+
+  it('refuses two bare .out() calls too — neither names a buffer, and the clip still writes twice', async () => {
+    const response = await postClip({ ...minimalPayload(), code: 'osc(10).out()\nnoise(3).out()' })
+    expect(response.status).toBe(400)
+  })
+
+  it('counts .out( with the probe scanner, so a commented-out call is not stored as a used output', async () => {
+    const response = await postClip({
+      ...minimalPayload(),
+      code: '// noise().out(o2)\nosc(10).out(o1)',
     })
     expect(response.status).toBe(201)
-    const body = await readJson<{ id: string }>(response)
-    const row = await env.DB.prepare('select isolated from clips where id = ?').bind(body.id).first()
-    expect(row?.isolated).toBe(1)
+    const body = await readJson<{ deps: { outputsUsed: string[] }; isolated: boolean }>(response)
+    expect(body.deps.outputsUsed).toStrictEqual(['o1'])
+    expect(body.isolated).toBe(false)
   })
 
   it('refuses a request with no Access assertion header', async () => {
@@ -219,15 +238,14 @@ describe('PATCH /api/clips/:id', () => {
   })
 
   it('cannot change isolated, and the stored row keeps its computed value', async () => {
-    const created = await postClip({
-      ...minimalPayload(),
-      code: 'osc(10).out(o1)\nnoise(3).out(o2)',
-    })
+    // Every clip the route now accepts is computed `isolated: false` — a multi-output one is
+    // refused at POST — so the value a patch must not be able to invent is `true`.
+    const created = await postClip(minimalPayload())
     const { id } = await readJson<{ id: string }>(created)
-    const response = await patchClip(id, { isolated: false })
+    const response = await patchClip(id, { isolated: true })
     expect(response.status).toBe(400)
     const row = await env.DB.prepare('select isolated from clips where id = ?').bind(id).first()
-    expect(row?.isolated).toBe(1)
+    expect(row?.isolated).toBe(0)
   })
 
   it('cannot change id, origin or deps', async () => {

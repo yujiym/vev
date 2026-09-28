@@ -3,7 +3,7 @@ import type { Slot } from '@vev/shared'
 
 import type { Clock } from '../clock.ts'
 import { HydraCompositor } from './compositor.ts'
-import { countOutCalls } from './rewrite.ts'
+import { countOutCalls, MULTI_OUTPUT_MESSAGE } from './rewrite.ts'
 import { framesDiffer, isSentinelFill, SENTINEL_CODE } from './sentinel.ts'
 
 /** The slot the probe always runs a clip in — matches the show's slot `a` (spec §6.1). */
@@ -89,14 +89,7 @@ export type ProbeResult =
  */
 const runProbe = (code: string, canvas: HTMLCanvasElement): ProbeResult => {
   if (countOutCalls(code) > 1) {
-    return {
-      message:
-        'This clip calls .out( more than once. The compositor already writes your clip to its ' +
-        'slot buffer for you — reduce the clip to a single .out( call (bare, or naming any ' +
-        'buffer) and remove the rest.',
-      ok: false,
-      reason: 'multi-output',
-    }
+    return { message: MULTI_OUTPUT_MESSAGE, ok: false, reason: 'multi-output' }
   }
 
   const clock: Clock = { beatsPerBar: 4, bpm: 120, downbeatAt: Date.now() }

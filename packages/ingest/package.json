@@ -11,6 +11,7 @@
     "test": "vp test"
   },
   "dependencies": {
+    "@vev/engines": "workspace:*",
     "@vev/shared": "workspace:*"
   },
   "devDependencies": {

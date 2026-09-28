@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import { describe, expect, it } from 'vitest'
 
-import { countOutCalls, rewriteOut } from './rewrite.ts'
+import { countOutCalls, outCallTargets, rewriteOut } from './rewrite.ts'
 
 describe(rewriteOut, () => {
   it('sends a bare out() to the slot buffer', () => {
@@ -105,5 +105,35 @@ describe(countOutCalls, () => {
     expect(countOutCalls('osc(10).out()')).toBe(1)
     expect(countOutCalls('osc(10).out(o3)')).toBe(1)
     expect(countOutCalls('osc(10).out(o1)\nnoise().out(o2)')).toBe(2)
+  })
+})
+
+describe(outCallTargets, () => {
+  it('names the buffer a single call targets', () => {
+    expect(outCallTargets('osc(10).out(o1)')).toStrictEqual(['o1'])
+  })
+
+  it('names each buffer in source order, duplicates kept — the caller decides what to do with them', () => {
+    expect(outCallTargets('osc(10).out(o2)\nnoise().out(o1)\nshape().out(o2)')).toStrictEqual([
+      'o2',
+      'o1',
+      'o2',
+    ])
+  })
+
+  it('names nothing for a bare .out(), whose target is the slot buffer rather than anything written', () => {
+    expect(outCallTargets('osc(10).out()')).toStrictEqual([])
+  })
+
+  it('skips a call inside a line comment, unlike a regex over raw source', () => {
+    expect(outCallTargets('// noise().out(o2)\nosc(10).out(o1)')).toStrictEqual(['o1'])
+  })
+
+  it('tolerates whitespace around the dot and the paren, unlike a regex over raw source', () => {
+    expect(outCallTargets('osc(10). out ( o3 )')).toStrictEqual(['o3'])
+  })
+
+  it('names nothing for an argument that is not a plain o0-o3 identifier, since its target is not knowable from the text', () => {
+    expect(outCallTargets('osc(10).out(buffers[i])')).toStrictEqual([])
   })
 })

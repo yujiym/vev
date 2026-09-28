@@ -1,5 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import { vValidator } from '@hono/valibot-validator'
+// The pure entry (`@vev/engines`, not `@vev/engines/hydra`) — string transforms over clip source
+// with no renderer behind them. `@vev/engines/hydra` pulls in `hydra-synth`, which touches
+// `window` at import time and must never reach a Worker.
+import { countOutCalls, MULTI_OUTPUT_MESSAGE } from '@vev/engines'
 import { analyzeHydra, normalizeHydra } from '@vev/ingest'
 import {
   clipDensitySchema,
@@ -88,6 +92,16 @@ export const clipsRoutes = new Hono<{ Bindings: Env }>()
     const id = crypto.randomUUID()
     const originalCode = body.code
     const code = normalizeHydra(body.code)
+
+    // The same refusal `probeClip` makes in the browser, made here as well — counted by the same
+    // scanner (`countOutCalls`), worded by the same message. §6.1 gives the compositor all four
+    // Hydra buffers and a clip exactly one of them, and `rewriteOut` leaves a two-`.out(` clip
+    // completely unrewritten, so such a clip would write another slot's buffer at playback with
+    // no error anywhere. A gate that lives only in the registration screen is a suggestion; this
+    // is the one the library's consumers can rely on.
+    if (body.engine === 'hydra' && countOutCalls(code) > 1) {
+      return c.text(MULTI_OUTPUT_MESSAGE, 400)
+    }
     // Ingestion only analyzes Hydra this milestone (§11.1); other engines get the empty deps
     // baseline rather than a guess, and are never isolated by inference.
     const { isolated, ...deps } =

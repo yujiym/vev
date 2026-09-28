@@ -8,12 +8,15 @@ const IDENT_CHAR = /[$0-9A-Z_a-z]/u
 const WHITESPACE = /\s/u
 
 interface OutCall {
+  /** Index just past the call's `(` — with `end - 1` (the matching `)`), the span of the call's own argument text. */
+  readonly argStart: number
   readonly end: number
   readonly start: number
 }
 
 /** A `.out(`'s own argument list, open until its matching `)`. `outCallStart` (the index of the `.`) is what lets closing it record the finished span in `calls`. */
 interface ParenRegion {
+  readonly argStart?: number
   depth: number
   readonly closesOn: ')'
   readonly outCallStart?: number
@@ -82,8 +85,8 @@ const advanceParenRegion = (
   if (code[i] === ')') {
     if (region.depth === 0) {
       stack.pop()
-      if (region.outCallStart !== undefined) {
-        calls.push({ end: i + 1, start: region.outCallStart })
+      if (region.outCallStart !== undefined && region.argStart !== undefined) {
+        calls.push({ argStart: region.argStart, end: i + 1, start: region.outCallStart })
       }
       return i + 1
     }
@@ -139,7 +142,7 @@ const tryEnterOutCall = (code: string, i: number, stack: Region[]): number | und
     return undefined
   }
 
-  stack.push({ closesOn: ')', depth: 0, outCallStart: i })
+  stack.push({ argStart: k + 1, closesOn: ')', depth: 0, outCallStart: i })
   return k + 1
 }
 
@@ -263,6 +266,37 @@ const findOutCalls = (code: string): OutCall[] => {
  * `o1`/`o2` to write), so a clip may legally call `.out(` at most once.
  */
 export const countOutCalls = (code: string): number => findOutCalls(code).length
+
+/** A Hydra output buffer named as a bare identifier: the only `.out(` argument shape whose target is knowable without evaluating the clip. */
+const BUFFER_ARGUMENT = /^o[0-3]$/u
+
+/**
+ * Which output buffer each real `.out(...)` call in `code` names, in source order, for the calls
+ * that name one at all — a bare `.out()`, or one whose argument is an expression rather than a
+ * plain `o0`-`o3` identifier, contributes nothing, because its target is not knowable from the
+ * text.
+ *
+ * This exists so that everything asking "which buffers does this clip name" reads the SAME scan
+ * as `countOutCalls` and `rewriteOut`. `@vev/ingest`'s `analyzeHydra` is the caller: it used to
+ * answer with its own `/\.out\(\s*(o[0-3])\s*\)/g` over raw source, which counted a call inside
+ * a comment and missed one written `. out (o3)` — so a clip could pass the probe (this scanner
+ * saying one call) and be stored naming a buffer it never writes (that regex saying two). Two
+ * implementations of one question always drift; there is now one.
+ */
+export const outCallTargets = (code: string): readonly string[] =>
+  findOutCalls(code)
+    .map((call) => code.slice(call.argStart, call.end - 1).trim())
+    .filter((argument) => BUFFER_ARGUMENT.test(argument))
+
+/**
+ * What to tell an author whose clip calls `.out(` more than once. One string, because there is one
+ * rule: `probeClip` refuses such a clip in the browser and `POST /api/clips` refuses it at the
+ * server, and a registrant who hits the two must not be told two different things.
+ */
+export const MULTI_OUTPUT_MESSAGE =
+  'This clip calls .out( more than once. The compositor already writes your clip to its ' +
+  'slot buffer for you — reduce the clip to a single .out( call (bare, or naming any ' +
+  'buffer) and remove the rest.'
 
 /**
  * Point a clip's output at the buffer it has been given.

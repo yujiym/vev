@@ -38,6 +38,23 @@ describe(analyzeHydra, () => {
     expect(deps.isolated).toBe(false)
   })
 
+  it('ignores an .out( call inside a line comment — the scanner @vev/engines hardened', () => {
+    const deps = analyzeHydra('// noise().out(o2)\nosc(10).out(o1)')
+    expect(deps.outputsUsed).toStrictEqual(['o1'])
+    expect(deps.isolated).toBe(false)
+  })
+
+  it('counts an .out( call written with whitespace around the dot and the paren', () => {
+    const deps = analyzeHydra('osc(10). out (o3)')
+    expect(deps.outputsUsed).toStrictEqual(['o3'])
+  })
+
+  it('marks two bare .out() calls isolated, though neither names a buffer', () => {
+    const deps = analyzeHydra('osc(10).out()\nnoise(3).out()')
+    expect(deps.outputsUsed).toStrictEqual([])
+    expect(deps.isolated).toBe(true)
+  })
+
   it('detects a camera source from s0.initCam()', () => {
     const deps = analyzeHydra('s0.initCam()\nsrc(s0).out(o1)')
     expect(deps.sourcesUsed).toStrictEqual(['cam'])
