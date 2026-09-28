@@ -103,6 +103,30 @@ export const openBrowser = async () => {
   return { apiCalls, browser, context, page, pageErrors }
 }
 
+/**
+ * Waits for `predicate` to hold in the page, and RETURNS whether it did instead of throwing.
+ *
+ * Two reasons this exists rather than calling `page.waitForFunction` directly.
+ *
+ * Its options are its THIRD argument — the second is the value handed to the predicate — so
+ * `waitForFunction(fn, { timeout })` silently passes the options object as data and falls back to
+ * the 30-second default. That mistake was documented in one driver here and then made in another,
+ * and nothing catches it: `apps/web/e2e/**` is excluded from lint. Named options make it
+ * unavailable rather than merely warned about.
+ *
+ * And it returns a boolean, so a caller can feed the real condition to `check` instead of letting
+ * a rejection end the run with no FAIL line, no summary and a browser still open. A driver that
+ * dies mid-way is a worse instrument than one that reports which check failed.
+ */
+export const until = async (page, predicate, { arg, timeout = 15_000 } = {}) => {
+  try {
+    await page.waitForFunction(predicate, arg, { timeout })
+    return true
+  } catch {
+    return false
+  }
+}
+
 export const shot = async (target, name) => await target.screenshot({ path: path.join(SHOTS, `${name}.png`) })
 
 /** Collapses the whitespace a rendered template is full of, so a failure message is readable. */

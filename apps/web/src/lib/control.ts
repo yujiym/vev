@@ -1,6 +1,17 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import type { Clock, PlaybackState } from '@vev/engines'
-import { barDurationMs, barPhase, bpmFromTaps, FIXTURES, initialPlayback, reduce } from '@vev/engines'
+import {
+  barDurationMs,
+  barPhase,
+  bpmFromTaps,
+  canGo,
+  canGoNow,
+  canQueue,
+  canSetTransition,
+  FIXTURES,
+  initialPlayback,
+  reduce,
+} from '@vev/engines'
 import { OUTPUT_CHANNEL, outputMessageSchema } from '@vev/shared'
 import type { OutputMessage, Slot, TransitionKind, TransitionSpec } from '@vev/shared'
 import * as v from 'valibot'
@@ -68,6 +79,20 @@ export interface ControlSnapshot {
   barPhase: number
   beatsPerBar: number
   bpm: number
+  /**
+   * Whether each control is legal RIGHT NOW, straight from the reducer's own predicates
+   * (`canGo` and friends in `@vev/engines`) rather than re-derived here from `fading`.
+   *
+   * This is the whole point of those predicates existing: a panel that works out for itself when
+   * Go is allowed is a second implementation of a rule the reducer owns, and in M1 the two drifted
+   * three times. A surface offering a control must disable it exactly when `reduce` would refuse
+   * it — so it asks, instead of deciding. `canGoNow` is deliberately true mid-fade: that press
+   * finishes the fade rather than doing nothing.
+   */
+  canGo: boolean
+  canGoNow: boolean
+  canQueue: boolean
+  canSetTransition: boolean
   current: Loaded
   /** The clip on screen, by name. `undefined` only for a start clip the panel was never given — an id is not a name, and a UUID on stage tells the performer nothing. */
   currentTitle: string | undefined
@@ -79,6 +104,50 @@ export interface ControlSnapshot {
   /** The loaded track, or `undefined` when the panel is not playing one. */
   track: TrackSnapshot | undefined
   transitionKind: TransitionKind
+}
+
+/**
+ * Why each control is unavailable, or `undefined` when it is available — one string per section of
+ * the panel.
+ *
+ * This lives here, beside the snapshot it reads, rather than in the `.svelte` file, for the reason
+ * ADR 0001 gives: a template is outside the type and lint gate, and "which refusal is showing" is
+ * exactly the kind of decision that silently rots there. It is also the other half of the M1
+ * ruling — a control that is disabled with no explanation is indistinguishable from a broken one,
+ * so every `false` in `canGo`/`canQueue`/`canSetTransition` has a sentence here to go with it.
+ */
+export interface ControlHints {
+  go: string | undefined
+  queue: string | undefined
+  track: string | undefined
+  transition: string | undefined
+}
+
+const FADE_RUNNING = 'Fade in progress'
+
+export const controlHints = (snapshot: ControlSnapshot): ControlHints => {
+  const queue = snapshot.canQueue
+    ? undefined
+    : `${FADE_RUNNING} — queueing is unavailable until it completes.`
+  const track = snapshot.canQueue
+    ? undefined
+    : `${FADE_RUNNING} — a track can't be loaded until it completes.`
+  const transition = snapshot.canSetTransition
+    ? undefined
+    : `${FADE_RUNNING} — the transition can't be changed until it completes.`
+
+  let go: string | undefined
+  if (snapshot.fading) {
+    go = `${FADE_RUNNING} — Go is unavailable until it completes; Go now finishes it early.`
+  } else if (snapshot.armed) {
+    // Not a fault, but still a reason the button is dead: the reducer refuses a second Go over an
+    // armed one, and without this the panel would look broken between the press and the bar.
+    go = 'Go is armed — the switch fires on the next bar.'
+  } else if (!snapshot.canGo) {
+    go = 'Nothing is queued — load a track or pick a fixture before Go.'
+  }
+
+  return { go, queue, track, transition }
 }
 
 export interface CreateControlOptions {
@@ -162,6 +231,10 @@ export const createControl = (
     barPhase: barPhase(clock, now()),
     beatsPerBar: clock.beatsPerBar,
     bpm: clock.bpm,
+    canGo: canGo(state),
+    canGoNow: canGoNow(state),
+    canQueue: canQueue(state),
+    canSetTransition: canSetTransition(state),
     current: state.current,
     currentTitle: clipsById.get(state.current.clipId)?.title,
     fading: state.fading !== undefined,
@@ -388,10 +461,10 @@ export const createControl = (
   }
 
   const loadTrack = (track: LoadedTrack): void => {
-    // Refused while a fade is running, for the same reason `queue` is: with two clip buffers there
-    // is nowhere to stage a change without disturbing the one the fade is blending into. The panel
-    // disables the track selector while `fading` and says why, so this refusal is visible.
-    if (state.fading) {
+    // Loading a track stages its first step, so it is legal exactly when queueing is — asked of
+    // the reducer's own predicate rather than re-derived here. The panel disables the track
+    // selector on the same `canQueue` and says why, so this refusal is visible rather than silent.
+    if (!canQueue(state)) {
       return
     }
 

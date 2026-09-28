@@ -3,6 +3,7 @@ import { vValidator } from '@hono/valibot-validator'
 import { newTrackSchema, trackSchema } from '@vev/shared'
 import type { Track, TrackItem } from '@vev/shared'
 import { asc, eq, inArray } from 'drizzle-orm'
+import type { BatchItem } from 'drizzle-orm/batch'
 import type { DrizzleD1Database } from 'drizzle-orm/d1'
 import { drizzle } from 'drizzle-orm/d1'
 import { Hono } from 'hono'
@@ -232,17 +233,32 @@ export const tracksRoutes = new Hono<{ Bindings: Env }>()
       update.visibility = patch.visibility
     }
 
+    // ONE batch for the whole edit — the track row and its items together.
+    //
+    // Doing the metadata update and the item replacement as two round trips is a torn write
+    // waiting to happen: a failure between them leaves a track whose title or mode changed and
+    // whose items did not, and rearranging a set list is precisely the operation a performer runs
+    // while building one. D1 batches are atomic, so this costs an arrangement and nothing else.
+    //
+    // Items are replaced wholesale rather than diffed: `position` IS an item's identity to the
+    // editor, and a reorder rewrites every position anyway.
+    const statements: BatchItem<'sqlite'>[] = []
     if (Object.keys(update).length > 0) {
-      await db.update(tracksTable).set(update).where(eq(tracksTable.id, id))
+      statements.push(db.update(tracksTable).set(update).where(eq(tracksTable.id, id)))
+    }
+    if (patch.items !== undefined) {
+      statements.push(db.delete(trackItemsTable).where(eq(trackItemsTable.trackId, id)))
+      const itemRows = itemRowsFor(id, patch.items)
+      if (itemRows.length > 0) {
+        statements.push(db.insert(trackItemsTable).values(itemRows))
+      }
     }
 
-    // Items are replaced wholesale rather than diffed: `position` is the item's identity to the
-    // editor, and a reorder rewrites every position anyway. Delete and insert travel in one
-    // `batch` so a failed insert cannot empty the track (see the POST comment above).
-    if (patch.items !== undefined) {
-      const itemRows = itemRowsFor(id, patch.items)
-      const remove = db.delete(trackItemsTable).where(eq(trackItemsTable.trackId, id))
-      await (itemRows.length === 0 ? remove : db.batch([remove, db.insert(trackItemsTable).values(itemRows)]))
+    // Destructured rather than cast: `db.batch` wants a non-empty tuple, and `[first, ...rest]`
+    // IS one once `first` is known to exist — no type assertion needed to satisfy it.
+    const [first, ...rest] = statements
+    if (first !== undefined) {
+      await db.batch([first, ...rest])
     }
 
     const updated = await readTrack(db, id)

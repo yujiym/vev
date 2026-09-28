@@ -36,6 +36,20 @@ check(
 )
 check('a brand-new track opens empty', (await page.textContent('main')).includes('no clips yet'))
 
+// Give the other track an item of its own — a DIFFERENT clip. Without this, "the editor loaded
+// this track's items and not the other's" passes merely because the other track is empty, which
+// proves nothing about the editor keying off `page.params.id`. Adding it through the picker also
+// covers the append-and-save path that nothing else here touches.
+await page.selectOption('section:has(h2:text-is("Add a clip")) select', clips.get('e2e textmode only').id)
+await page.click('section:has(h2:text-is("Add a clip")) button:has-text("Add")')
+await page.click('button:has-text("Save")')
+await page.waitForSelector('[role="status"]:has-text("Saved.")', { timeout: 10_000 })
+check(
+  'a clip added through the picker is saved onto the track',
+  JSON.stringify(await titles()) === JSON.stringify(['e2e textmode only']),
+  (await titles()).join(' → '),
+)
+
 // --- opening by id loads THAT track's items, resolved to clip titles ---
 await page.goto(`${BASE}/studio/tracks/${track.id}`, { waitUntil: 'networkidle' })
 await page.locator('ol > li').first().waitFor({ timeout: 10_000 })
@@ -48,9 +62,12 @@ check(
   JSON.stringify(await titles()) === JSON.stringify(['e2e bright kaleid', 'e2e dark drift']),
   (await titles()).join(' → '),
 )
+// Distinguished by CONTENT now, not by count: the other track holds "e2e textmode only", which
+// this one never does, so an editor that ignored the id would be caught.
 check(
   'and they are this track’s items, not the other track’s',
-  otherId !== track.id && (await page.locator('ol > li').count()) === 2,
+  otherId !== track.id && !(await titles()).includes('e2e textmode only'),
+  `${otherId === track.id ? 'same id!' : 'distinct ids'} · showing: ${(await titles()).join(', ')}`,
 )
 check(
   'a section label saved earlier is shown in its field',

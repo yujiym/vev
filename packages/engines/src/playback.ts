@@ -33,6 +33,36 @@ export const initialPlayback = (clipId: string, transition: TransitionSpec): Pla
 
 const other = (slot: Slot): Slot => (slot === 'a' ? 'b' : 'a')
 
+/**
+ * When each control is legal, as ONE definition that `reduce` itself uses.
+ *
+ * These exist because a panel that re-derives "is Go legal?" from its own reading of the state is
+ * a second implementation of a rule this module owns, and the two drift. In M1 they drifted three
+ * times, and the ruling that came out of it named only the fade — so a panel guarding on `fading`
+ * alone still offered Go with nothing queued, and still offered it after Go was already armed.
+ * The fix is not another guard in the panel; it is that there is only one predicate, exported, and
+ * `reduce`'s own guards are written in terms of it. A control the reducer refuses is exactly a
+ * control the UI must disable, by construction rather than by agreement.
+ */
+
+/** Go is legal only with something queued, nothing already armed, and no fade running. */
+export const canGo = (state: PlaybackState): boolean =>
+  state.next !== undefined && state.firing === undefined && state.fading === undefined
+
+/**
+ * Go now is legal mid-fade — it finishes the fade rather than doing nothing, which is why it is
+ * the one control that stays enabled while every other is refused — and otherwise needs something
+ * queued.
+ */
+export const canGoNow = (state: PlaybackState): boolean =>
+  state.fading !== undefined || state.next !== undefined
+
+/** With two clip buffers there is nowhere to stage a change into while a fade blends one of them. */
+export const canQueue = (state: PlaybackState): boolean => state.fading === undefined
+
+/** Changing the transition mid-fade would either cut the fade short or desync it from the output. */
+export const canSetTransition = (state: PlaybackState): boolean => state.fading === undefined
+
 /** The queued clip becomes the current one; both the armed moment and the fade are spent. */
 const complete = (state: PlaybackState): PlaybackState => {
   if (!state.next) {
@@ -69,10 +99,9 @@ const tick = (state: PlaybackState, now: number, clock: Clock): PlaybackState =>
 export const reduce = (state: PlaybackState, event: PlaybackEvent, clock: Clock): PlaybackState => {
   switch (event.kind) {
     case 'select-next': {
-      // While a fade is running there is nowhere to stage a change without
-      // disturbing the buffer it is blending into (M1 has exactly two clip
-      // buffers, o1/o2) — so queueing is refused outright, not redirected.
-      if (state.fading) {
+      // The refusal lives in `canQueue`, not here — see its doc comment: one predicate, used both
+      // by this reducer and by whatever surface offers the control.
+      if (!canQueue(state)) {
         return state
       }
       // The queued clip always takes the buffer the current one is not using.
@@ -80,10 +109,9 @@ export const reduce = (state: PlaybackState, event: PlaybackEvent, clock: Clock)
     }
 
     case 'go': {
-      // A running fade is already committed to its own destination; arming a
-      // second switch on top of it is refused, the same as `select-next`
-      // above and `set-transition` below.
-      if (!state.next || state.firing || state.fading) {
+      // `canGo` is the whole rule: something queued, nothing already armed (a running fade is
+      // already committed to its own destination), no fade in flight.
+      if (!canGo(state)) {
         return state
       }
 
@@ -91,12 +119,11 @@ export const reduce = (state: PlaybackState, event: PlaybackEvent, clock: Clock)
     }
 
     case 'set-transition': {
-      // Changing the transition mid-fade would either end the running fade
-      // early (its own `bars` is what `tick` measures the span against) or
-      // desync the control from what the output is actually blending — both
-      // are refused. Before a fade starts (armed via Go but not yet fading)
-      // this is still allowed: `go` already re-publishes with the new kind.
-      if (state.fading) {
+      // Refused mid-fade (`canSetTransition`): it would either end the running fade early — its
+      // own `bars` is what `tick` measures the span against — or desync the control from what the
+      // output is actually blending. Before a fade starts (armed via Go but not yet fading) this
+      // is still allowed: `go` already re-publishes with the new kind.
+      if (!canSetTransition(state)) {
         return state
       }
 
@@ -109,7 +136,7 @@ export const reduce = (state: PlaybackState, event: PlaybackEvent, clock: Clock)
       if (state.fading) {
         return complete(state)
       }
-      if (!state.next) {
+      if (!canGoNow(state)) {
         return state
       }
 

@@ -4,7 +4,7 @@ import type { OutputMessage } from '@vev/shared'
 import { describe, expect, it, vi } from 'vitest'
 
 import type { LoadedTrack, PlayableClip, TrackStep } from './control.ts'
-import { createControl, startControl } from './control.ts'
+import { controlHints, createControl, startControl } from './control.ts'
 
 /**
  * A fake `BroadcastChannel`, the same shape as `output-client.test.ts`'s:
@@ -935,5 +935,99 @@ describe('track playback', () => {
 
     expect(control.getSnapshot().track).toBeUndefined()
     expect(control.getSnapshot().current.clipId).toBe('one')
+  })
+})
+
+/**
+ * The panel disables a control exactly when the reducer would refuse it. These assert on the
+ * SNAPSHOT — what the template actually binds `disabled` to — rather than on `PlaybackState`,
+ * because the gap this closes was never in the reducer: it was between the reducer and the
+ * surface. `packages/engines`'s own suite proves the predicates match `reduce`; this proves the
+ * panel is wired to those predicates and not to a second reading of `fading`.
+ */
+describe('what the panel may offer', () => {
+  const idle = () => {
+    const clockNow = createFakeNow(0)
+    const { control, messages } = trackControl(clockNow)
+    return { clockNow, control, messages }
+  }
+
+  it('refuses Go with nothing queued, and says why', () => {
+    const { control } = idle()
+    const snapshot = control.getSnapshot()
+
+    expect(snapshot.canGo).toBe(false)
+    expect(snapshot.fading).toBe(false)
+    expect(controlHints(snapshot).go).toContain('Nothing is queued')
+  })
+
+  it('allows Go once something is queued, with nothing to explain', () => {
+    const { control } = idle()
+    control.queue('one')
+
+    expect(control.getSnapshot().canGo).toBe(true)
+    expect(controlHints(control.getSnapshot()).go).toBeUndefined()
+  })
+
+  it('refuses a second Go over an armed one, and says why — no fade involved', () => {
+    const { clockNow, control } = idle()
+    control.queue('one')
+    clockNow.set(500)
+    control.go()
+
+    const snapshot = control.getSnapshot()
+    expect(snapshot.fading).toBe(false)
+    expect(snapshot.armed).toBe(true)
+    expect(snapshot.canGo).toBe(false)
+    expect(controlHints(snapshot).go).toContain('armed')
+  })
+
+  it('mid-fade, refuses Go, queueing and the transition — but not Go now', () => {
+    const { clockNow, control } = idle()
+    control.loadTrack(
+      track([
+        { bars: 4, clipId: 'one', transition: FADE_SPEC },
+        { bars: 4, clipId: 'two', transition: CUT_SPEC },
+      ]),
+    )
+    clockNow.set(500)
+    control.go()
+    clockNow.set(2000)
+    control.tick()
+
+    const snapshot = control.getSnapshot()
+    expect(snapshot.fading).toBe(true)
+    expect({
+      canGo: snapshot.canGo,
+      canGoNow: snapshot.canGoNow,
+      canQueue: snapshot.canQueue,
+      canSetTransition: snapshot.canSetTransition,
+    }).toStrictEqual({ canGo: false, canGoNow: true, canQueue: false, canSetTransition: false })
+  })
+
+  it('gives every mid-fade refusal a sentence, so no control is dead without a reason', () => {
+    const { clockNow, control } = idle()
+    control.loadTrack(track([{ bars: 4, clipId: 'one', transition: FADE_SPEC }]))
+    clockNow.set(500)
+    control.go()
+    clockNow.set(2000)
+    control.tick()
+
+    const hints = controlHints(control.getSnapshot())
+    const shown = [hints.go, hints.queue, hints.track, hints.transition].filter((hint) => hint !== undefined)
+    expect(shown).toHaveLength(4)
+    expect(shown.every((hint) => hint.includes('Fade in progress'))).toBe(true)
+  })
+
+  it('explains nothing when everything is available', () => {
+    const { control } = idle()
+    control.queue('one')
+
+    expect(controlHints(control.getSnapshot())).toStrictEqual({
+      go: undefined,
+      queue: undefined,
+      track: undefined,
+      transition: undefined,
+    })
   })
 })

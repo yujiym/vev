@@ -8,7 +8,7 @@ export { barDurationMs, barPhase, bpmFromTaps, nextBarAt } from './clock.ts'
 export type { Clock } from './clock.ts'
 export { FIXTURES } from './fixtures.ts'
 export { rewriteOut } from './hydra/rewrite.ts'
-export { initialPlayback, reduce } from './playback.ts'
+export { canGo, canGoNow, canQueue, canSetTransition, initialPlayback, reduce } from './playback.ts'
 export type { PlaybackEvent, PlaybackState } from './playback.ts'
 export { fadeProgress } from './transition.ts'
 // Slot and TransitionSpec are @vev/shared's; they are not re-exported here, so there

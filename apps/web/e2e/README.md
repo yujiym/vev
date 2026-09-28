@@ -30,6 +30,23 @@ On a fresh machine the first run also downloads Chromium (into `~/.cache/ms-play
 
 Each script exits non-zero if any check fails, and prints one `PASS`/`FAIL` line per check. Screenshots land in `e2e/screenshots/` (git-ignored).
 
+## If a run looks broken, check for an orphaned Worker first
+
+`wrangler dev` leaves `workerd` child processes behind when it is killed abruptly, and they are the most likely reason a driver misbehaves in a way that has nothing to do with the code:
+
+- One still holding `:8787` makes the next `pnpm live` die on bind — so the drivers talk to the **old** Worker, quite possibly serving a **stale build**.
+- One still holding an open handle on `apps/api/.wrangler/state` keeps the **old database** alive after that directory has been renamed or deleted. A rename does not close a file handle: the process keeps writing to the inode, so a run that looks like it is exercising a fresh database is not. This cost a reviewer real time.
+
+Check and clear before blaming a driver:
+
+```bash
+lsof -i :8787                 # or: ss -lptn 'sport = :8787'
+pgrep -af 'wrangler|workerd'
+pkill -f workerd; pkill -f wrangler
+```
+
+Then confirm the port is actually free (`curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8787/api/health` prints `000`) before starting `pnpm live` again. If you are resetting the database, stop every one of those processes **first**, then remove `apps/api/.wrangler/state`.
+
 ## What they check
 
 - **`library.mjs`** — `/studio/clips`. That changing a filter really refetches (the `?engine=` request is captured off the network, not inferred) and really narrows the grid; that a browser-side filter never invents a query parameter the route would ignore; that a refused filter shows the route's own 400 message and **no** clips rather than silently falling back to the whole library; and that a clip whose annotation FAILED is marked differently from one still PENDING — one needs a human, the other needs only time.

@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
 <script lang="ts">
   import type { Control, ControlSnapshot } from '$lib/control.ts'
-  import { startControl } from '$lib/control.ts'
+  import { controlHints, startControl } from '$lib/control.ts'
   import { fetchClip } from '$lib/library.ts'
   import { fetchTrack, fetchTrackClips, fetchTracks, resolveTrack } from '$lib/track-editor.ts'
   import { FIXTURES } from '@vev/engines'
@@ -19,6 +19,10 @@
 
   let snapshot = $state<ControlSnapshot | undefined>()
   let control: Control | undefined
+
+  // Which refusal to show, and whether a control is legal, are both the reducer's answers — see
+  // `controlHints` and `ControlSnapshot`'s `canGo`. Nothing on this page re-derives either.
+  const hints = $derived(snapshot ? controlHints(snapshot) : undefined)
 
   let tracks = $state<readonly Track[]>([])
   let selectedTrackId = $state('')
@@ -81,17 +85,17 @@
 
   <section>
     <h2>Track</h2>
-    {#if snapshot?.fading}
-      <p role="status">Fade in progress — a track can't be loaded until it completes.</p>
+    {#if hints?.track}
+      <p role="status">{hints.track}</p>
     {/if}
-    <select bind:value={selectedTrackId} disabled={snapshot?.fading || loadingTrack}>
+    <select bind:value={selectedTrackId} disabled={!snapshot?.canQueue || loadingTrack}>
       <option value="">choose a track…</option>
       {#each tracks as track (track.id)}
         <option value={track.id}>{track.title}</option>
       {/each}
     </select>
     <button
-      disabled={snapshot?.fading || loadingTrack || selectedTrackId === ''}
+      disabled={!snapshot?.canQueue || loadingTrack || selectedTrackId === ''}
       onclick={() => void playTrack(selectedTrackId)}
       type="button">Load track</button
     >
@@ -132,12 +136,12 @@
 
   <section>
     <h2>Fixtures</h2>
-    {#if snapshot?.fading}
-      <p role="status">Fade in progress — queueing is unavailable until it completes.</p>
+    {#if hints?.queue}
+      <p role="status">{hints.queue}</p>
     {/if}
     <p class="note">Queueing a fixture by hand leaves the loaded track.</p>
     {#each FIXTURES as fixture (fixture.id)}
-      <button disabled={snapshot?.fading} onclick={() => control?.queue(fixture.id)} type="button">
+      <button disabled={!snapshot?.canQueue} onclick={() => control?.queue(fixture.id)} type="button">
         {fixture.title}
       </button>
     {/each}
@@ -150,8 +154,8 @@
 
   <section>
     <h2>Transition</h2>
-    {#if snapshot?.fading}
-      <p role="status">Fade in progress — the transition can't be changed until it completes.</p>
+    {#if hints?.transition}
+      <p role="status">{hints.transition}</p>
     {/if}
     {#if snapshot?.track}
       <p class="note">A loaded track sets the transition for each item as it is staged.</p>
@@ -159,7 +163,7 @@
     <label>
       <input
         checked={snapshot?.transitionKind === 'cut'}
-        disabled={snapshot?.fading}
+        disabled={!snapshot?.canSetTransition}
         name="transition"
         onchange={() => control?.setTransitionKind('cut')}
         type="radio"
@@ -170,7 +174,7 @@
     <label>
       <input
         checked={snapshot?.transitionKind === 'crossfade'}
-        disabled={snapshot?.fading}
+        disabled={!snapshot?.canSetTransition}
         name="transition"
         onchange={() => control?.setTransitionKind('crossfade')}
         type="radio"
@@ -182,11 +186,13 @@
 
   <section>
     <h2>Go</h2>
-    {#if snapshot?.fading}
-      <p role="status">Fade in progress — Go is unavailable until it completes; Go now finishes it early.</p>
+    {#if hints?.go}
+      <p role="status">{hints.go}</p>
     {/if}
-    <button disabled={snapshot?.fading} onclick={() => control?.go()} type="button">Go</button>
-    <button onclick={() => control?.goNow()} type="button">Go now</button>
+    <button disabled={!snapshot?.canGo} onclick={() => control?.go()} type="button">Go</button>
+    <!-- Deliberately NOT disabled mid-fade: `canGoNow` is true then, because that press finishes
+         the fade rather than doing nothing. -->
+    <button disabled={!snapshot?.canGoNow} onclick={() => control?.goNow()} type="button">Go now</button>
   </section>
 
   <section>

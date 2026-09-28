@@ -256,6 +256,24 @@ describe('PATCH /api/tracks/:id', () => {
     await expect(storedOrder(created.id)).resolves.toStrictEqual([clip])
   })
 
+  it('applies a metadata change and a reorder as one edit', async () => {
+    const first = await registerClip({ title: 'First' })
+    const second = await registerClip({ title: 'Second' })
+    const created = await createTrack({ items: [{ clipId: first }, { clipId: second }] })
+
+    const body = await readJson<Track>(
+      await patchTrack(created.id, {
+        items: [{ clipId: second }, { clipId: first }],
+        title: 'Renamed and reordered',
+      }),
+    )
+
+    // Both halves travel in one D1 batch, so there is no window where the title moved and the
+    // items did not — which is the state a performer would be left in by a torn write.
+    expect(body.title).toBe('Renamed and reordered')
+    await expect(storedOrder(created.id)).resolves.toStrictEqual([second, first])
+  })
+
   it('refuses a reorder that introduces a clip which does not exist', async () => {
     const clip = await registerClip({ title: 'Kept' })
     const created = await createTrack({ items: [{ clipId: clip }] })
