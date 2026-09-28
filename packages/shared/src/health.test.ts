@@ -24,4 +24,34 @@ describe('health response schema', () => {
     })
     expect(result.success).toBe(false)
   })
+
+  it('rejects an empty commit', () => {
+    const result = v.safeParse(healthResponseSchema, {
+      commit: '',
+      mode: 'local',
+      ok: true,
+      settingsRows: 0,
+    })
+    expect(result.success).toBe(false)
+  })
+
+  it('rejects negative settingsRows', () => {
+    const result = v.safeParse(healthResponseSchema, {
+      commit: 'abc1234',
+      mode: 'local',
+      ok: true,
+      settingsRows: -1,
+    })
+    expect(result.success).toBe(false)
+  })
+
+  it('rejects non-integer settingsRows', () => {
+    const result = v.safeParse(healthResponseSchema, {
+      commit: 'abc1234',
+      mode: 'local',
+      ok: true,
+      settingsRows: 1.5,
+    })
+    expect(result.success).toBe(false)
+  })
 })
