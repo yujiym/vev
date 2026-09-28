@@ -1,0 +1,4 @@
+# Isolated worktrees for plan execution
+.worktrees/
+# Subagent-driven development workspace (ledgers, briefs, reports, review packages)
+.superpowers/sdd/
