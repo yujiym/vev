@@ -14,7 +14,6 @@
     "migrate:remote": "wrangler d1 migrations apply vev --remote"
   },
   "dependencies": {
-    "@hono/valibot-validator": "^0.6.1",
     "@vev/shared": "workspace:*",
     "drizzle-orm": "^0.45.3",
     "hono": "^4.13.9",
