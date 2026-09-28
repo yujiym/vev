@@ -771,7 +771,8 @@ Local mode is how vev runs at a venue: the same artifact as the deployed one —
 
 ## 17. Open questions / to verify
 
-- [ ] Workers AI `typesafe/jev`: exact request/response shape via the binding, pricing on Cloudflare, limits (max options per `choice`, context length), AI Gateway integration
+- [x] Workers AI `typesafe/jev`: answered from Cloudflare's model page (2026-09-29). Called as `env.AI.run('typesafe/jev', { state, questions })`. Question types are `choice`, `score` and `noul`; a `choice` answer carries the selected option, a confidence and per-option probabilities, a `score` answer a numeric value, a confidence, a legend and per-level probabilities, and a `noul` answer a probability. Billing is $0.042 per 1M input tokens with output and cached input at $0.00, the context window is 32,000 tokens, zero data retention applies, and the model reports itself as `jev-1.13.0`. Still open: the maximum number of options a `choice` accepts, and whether the call can be routed through an AI Gateway.
+- [ ] Whether `wrangler ai models` can list models outside the `@cf/` namespace. It lists 65 `@cf/` models and omits `typesafe/jev`, which the documentation confirms exists — so the CLI listing is not a reliable way to check availability.
 - [ ] System One wire format for `systemone-http` providers (TypeSafe, Kev, OpenRouter) and differences between them
 - [ ] Kev: recommended size for local use (0.6B/0.8B vs 4B), license of weights and base model
 - [ ] `textmode.js` / `textmode.synth.js` exact licenses. npm metadata says MIT and AGPL-3.0 respectively (2026-09-28), both AGPL-compatible; read the LICENSE files themselves before M8 ships them. editor.textmode.art is AGPL-3.0, so borrowing from it is license-compatible, but credit it properly if any code is reused
