@@ -90,12 +90,14 @@ describe(probeClip, () => {
     expect(result.ok).toBe(true)
   })
 
-  it('refuses two named out() calls with the multi-output reason', async () => {
+  it('refuses two named out() calls with the multi-output reason and an actionable message', async () => {
     const canvas = {} as HTMLCanvasElement
 
     const result = await probeClip('osc(10).out(o1)\nnoise().out(o2)', canvas)
 
-    expect(asFailure(result).reason).toBe('multi-output')
+    const failure = asFailure(result)
+    expect(failure.reason).toBe('multi-output')
+    expect(failure.message).toMatch(/single .out\(/u)
   })
 
   it('refuses two bare out() calls with the multi-output reason too', async () => {

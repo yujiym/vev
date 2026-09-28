@@ -156,7 +156,7 @@
       {#if probeResult.ok}
         <p role="status">Probe passed — max frame time {probeResult.maxFrameMs.toFixed(1)}ms.</p>
       {:else}
-        <p role="alert">Probe failed: {probeResult.reason}</p>
+        <p role="alert">Probe failed: {probeResult.message ?? probeResult.reason}</p>
       {/if}
     {/if}
   </section>

@@ -36,6 +36,11 @@ export type ProbeResult =
   | {
       readonly error?: unknown
       readonly maxFrameMs?: number
+      // Set only where the reason is something the author can act on by editing the clip in a
+      // specific way, as opposed to a diagnosis (`black-frame`, `budget-exceeded`) — currently
+      // just `multi-output`. Callers that show a failure should prefer this over the bare
+      // `reason` when it's present.
+      readonly message?: string
       readonly ok: false
       readonly reason: ProbeFailureReason
     }
@@ -84,7 +89,14 @@ export type ProbeResult =
  */
 const runProbe = (code: string, canvas: HTMLCanvasElement): ProbeResult => {
   if (countOutCalls(code) > 1) {
-    return { ok: false, reason: 'multi-output' }
+    return {
+      message:
+        'This clip calls .out( more than once. The compositor already writes your clip to its ' +
+        'slot buffer for you — reduce the clip to a single .out( call (bare, or naming any ' +
+        'buffer) and remove the rest.',
+      ok: false,
+      reason: 'multi-output',
+    }
   }
 
   const clock: Clock = { beatsPerBar: 4, bpm: 120, downbeatAt: Date.now() }

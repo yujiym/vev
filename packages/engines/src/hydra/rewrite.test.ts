@@ -43,6 +43,31 @@ describe(rewriteOut, () => {
     expect(rewriteOut(multi, 'a')).toBe(multi)
     expect(rewriteOut(multi, 'b')).toBe(multi)
   })
+
+  it('finds a call with whitespace between the dot and out and between out and the paren', () => {
+    expect(rewriteOut('osc(10). out (o3)', 'a')).toBe('osc(10).out(o1)')
+  })
+
+  it('finds a call with a newline between the dot and the name', () => {
+    expect(rewriteOut('osc(10).\n  out(o3)', 'a')).toBe('osc(10).out(o1)')
+  })
+
+  it('does not count a call inside a line comment', () => {
+    expect(rewriteOut('osc(10).out()\n// noise().out()', 'a')).toBe('osc(10).out(o1)\n// noise().out()')
+  })
+
+  it('does not count a call inside a block comment', () => {
+    const code = 'osc(10).out()\n/* noise().out()\n   solid().out() */'
+    expect(rewriteOut(code, 'a')).toBe('osc(10).out(o1)\n/* noise().out()\n   solid().out() */')
+  })
+
+  it('does not count a call inside a string', () => {
+    expect(rewriteOut('text("see .out() docs").out()', 'a')).toBe('text("see .out() docs").out(o1)')
+  })
+
+  it('does not mistake .output( for an output call', () => {
+    expect(rewriteOut('osc(10).output(x).out()', 'a')).toBe('osc(10).output(x).out(o1)')
+  })
 })
 
 describe(countOutCalls, () => {
