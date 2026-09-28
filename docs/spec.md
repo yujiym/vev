@@ -235,7 +235,7 @@ interface Clip {
   }
   author: string
   sourceUrl?: string
-  license: string // "CC BY-NC-SA 4.0", ...
+  license: string // an SPDX id, a licence name ("CC BY-NC-SA 4.0"), or "unknown" — never empty (§14.2)
   commercialOk: boolean
   modified: boolean
 
@@ -691,6 +691,7 @@ Generating clip code with a model is a later feature (§1), but a few MVP decisi
   - Public pages only run code of clips referenced by the track, fetched from the library.
 - **Local mode has no Cloudflare Access.** The Worker binds to `127.0.0.1` only, and a request that does not come from loopback is never treated as the owner. Local mode is never served on a LAN address or `0.0.0.0` (§15.3).
 - Chat text leaves the Worker only for the configured interpretation provider (§8.6), on the same owner-only, rate-limited path as `/api/candidates`. In local mode nothing leaves the machine.
+- **A preview deployment is a second front door.** Cloudflare Access policies bind to hostnames, so a policy covering the custom domain does not cover a `*.workers.dev` preview or version URL: publishing one exposes `/studio/*` and the owner `/api/*` routes to anyone holding the link. A reachable deployment is only acceptable when its hostname is covered by the Access policy, or when it carries no owner routes at all. The same applies to bindings — a preview version runs against whatever environment it was uploaded with, so a preview wired to production bindings can write to production data. Previews therefore take their own environment, never the production one.
 - Decision-provider secrets never leave the Worker (§8.4).
 
 ---
@@ -717,6 +718,7 @@ Clips are content, not code of vev, and keep their authors' licenses.
 
 - The repository **does not ship third-party clips**. Only clips written by the vev authors may be included as examples, under `examples/clips/` with a per-file license header (recommended: CC BY 4.0 or CC0 so users can perform with them freely).
 - `license` / `commercialOk` / `author` / `sourceUrl` / `modified` are mandatory on every clip.
+- **A clip whose licence nobody stated is recorded as `unknown`, not guessed.** Most sketches shared in the Hydra community carry no licence at all, and inventing one is worse than admitting the gap. `license: "unknown"` forces `commercialOk: false`, is shown as unknown wherever the clip appears (library, credits overlay, exported set list), and can never enter this repository — `examples/clips/` takes only the vev authors' own work. Running such a clip in a performer's own local library is their call to make; redistributing it is not vev's to make for them.
 - With `Track.mode = "commercial"`, clips with `commercialOk = false` are excluded from candidates and tracks (with a warning).
 - Parameter changes and transition mixing may count as modification; support `modified` and credit display accordingly.
 - After a session, export a set list with credits (Markdown / text).
@@ -775,6 +777,7 @@ Local mode is how vev runs at a venue: the same artifact as the deployed one —
 - [ ] `textmode.js` / `textmode.synth.js` exact licenses. npm metadata says MIT and AGPL-3.0 respectively (2026-09-28), both AGPL-compatible; read the LICENSE files themselves before M8 ships them. editor.textmode.art is AGPL-3.0, so borrowing from it is license-compatible, but credit it properly if any code is reused
 - [ ] ISF renderer selection (WebGL2, multi-pass, audioFFT inputs, AGPL-compatible license)
 - [ ] Whether the "Deploy to Cloudflare" button supports all required bindings (D1, R2, Vectorize, Queues, AI)
+- [ ] How preview deployments are shaped: which Cloudflare mechanism (version preview URLs, Workers Builds), which environment and bindings they get, and how the Access policy is made to cover their hostname (§13)
 - [ ] Workers AI embedding model (Japanese support; dimensions must match the Vectorize index)
 - [ ] Whether Vectorize metadata filters can handle engine / commercialOk / isolated / origin / reviewed (index design)
 - [ ] LLM for ingestion annotation and its prompt design
