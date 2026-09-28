@@ -24,7 +24,18 @@ export default defineConfig({
     // fragments meant to be pasted into an existing block (a describe body, an
     // interface), and linting/formatting each fenced block as a standalone file
     // would flag or rewrite that deliberate indentation.
-    ignorePatterns: ['**/worker-configuration.d.ts', '**/.svelte-kit/**', '**/build/**', '.superpowers/**'],
+    // apps/web/e2e/** is excluded for one structural reason: those scripts import `playwright`,
+    // which is deliberately NOT a dependency of this repository (they are a manual browser check,
+    // run via `npx --package`, and the gate must never pull a browser download). Type-aware lint
+    // therefore cannot resolve that import, and every rule downstream of it reports on an `any`.
+    // They are still formatted by oxfmt — only lint skips them. See apps/web/e2e/README.md.
+    ignorePatterns: [
+      '**/worker-configuration.d.ts',
+      '**/.svelte-kit/**',
+      '**/build/**',
+      '.superpowers/**',
+      'apps/web/e2e/**',
+    ],
     options: {
       typeAware: true,
       typeCheck: true,

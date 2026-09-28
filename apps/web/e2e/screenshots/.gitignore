@@ -1,0 +1,3 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Captures are evidence for whoever ran the drivers, not repository artefacts.
+*.png
