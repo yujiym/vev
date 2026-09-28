@@ -63,13 +63,19 @@ export interface TrackSnapshot {
 }
 
 export interface ControlSnapshot {
+  /** True once Go (or Go now) has armed a switch that has not yet fired. A panel that showed only `fading` would look identical before and after a press whose bar has not landed. */
+  armed: boolean
   barPhase: number
   beatsPerBar: number
   bpm: number
   current: Loaded
+  /** The clip on screen, by name. `undefined` only for a start clip the panel was never given — an id is not a name, and a UUID on stage tells the performer nothing. */
+  currentTitle: string | undefined
   /** True while a crossfade is running. `go`, `queue` and `setTransitionKind` are all refused during it; `goNow` is not refused — it finishes the fade immediately instead. See `playback.ts`'s `fading` guards. */
   fading: boolean
   next: Loaded | undefined
+  /** The queued clip, by name. See `currentTitle`. */
+  nextTitle: string | undefined
   /** The loaded track, or `undefined` when the panel is not playing one. */
   track: TrackSnapshot | undefined
   transitionKind: TransitionKind
@@ -152,12 +158,15 @@ export const createControl = (
   let run: TrackRun | undefined
 
   const snapshot = (): ControlSnapshot => ({
+    armed: state.firing !== undefined,
     barPhase: barPhase(clock, now()),
     beatsPerBar: clock.beatsPerBar,
     bpm: clock.bpm,
     current: state.current,
+    currentTitle: clipsById.get(state.current.clipId)?.title,
     fading: state.fading !== undefined,
     next: state.next,
+    nextTitle: state.next === undefined ? undefined : clipsById.get(state.next.clipId)?.title,
     track:
       run === undefined
         ? undefined

@@ -880,6 +880,48 @@ describe('track playback', () => {
     expect(messages).toStrictEqual([{ clip: { code: 'osc(1).out()', id: 'one' }, kind: 'load', slot: 'b' }])
   })
 
+  it('names the clips by title, since a UUID on stage tells the performer nothing', () => {
+    const clockNow = createFakeNow(0)
+    const { control } = trackControl(clockNow)
+    control.loadTrack(cutTrack())
+
+    expect(control.getSnapshot().nextTitle).toBe('One')
+
+    clockNow.set(500)
+    control.go()
+    clockNow.set(2000)
+    control.tick()
+
+    expect(control.getSnapshot().currentTitle).toBe('One')
+    expect(control.getSnapshot().nextTitle).toBe('Two')
+  })
+
+  it('has no title for a clip the panel was never given, rather than inventing one', () => {
+    const clockNow = createFakeNow(0)
+    const { control } = trackControl(clockNow)
+
+    // `startClipId` is 'start', which is in no clip list this control was handed.
+    expect(control.getSnapshot().currentTitle).toBeUndefined()
+  })
+
+  it('reports a switch as armed between the press and the bar it lands on', () => {
+    const clockNow = createFakeNow(0)
+    const { control } = trackControl(clockNow)
+    control.loadTrack(cutTrack())
+
+    expect(control.getSnapshot().armed).toBe(false)
+
+    clockNow.set(500)
+    control.go()
+    // Pressed, but the bar has not come round yet — a panel showing only `fading` would look
+    // exactly as it did before the press.
+    expect(control.getSnapshot().armed).toBe(true)
+
+    clockNow.set(2000)
+    control.tick()
+    expect(control.getSnapshot().armed).toBe(false)
+  })
+
   it('clearing the track leaves what is on screen alone', () => {
     const clockNow = createFakeNow(0)
     const { control } = trackControl(clockNow)

@@ -100,7 +100,12 @@
     {/if}
 
     {#if snapshot?.track}
-      {#if snapshot.track.index < 0}
+      {#if snapshot.track.index < 0 && (snapshot.armed || snapshot.fading)}
+        <p role="status">
+          {snapshot.track.title} — item 1 of {snapshot.track.length} is on its way in. Auto-advance takes over from
+          the item after it.
+        </p>
+      {:else if snapshot.track.index < 0}
         <p role="status">
           {snapshot.track.title} — item 1 of {snapshot.track.length} is staged and loaded. Press Go to start the
           track; auto-advance takes over from the item after it.
@@ -136,7 +141,11 @@
         {fixture.title}
       </button>
     {/each}
-    <p>Next: {snapshot?.next ? snapshot.next.clipId : '—'}</p>
+    <p>
+      Now: {snapshot?.currentTitle ?? snapshot?.current.clipId ?? '—'} · Next: {snapshot?.next
+        ? (snapshot.nextTitle ?? snapshot.next.clipId)
+        : '—'}{snapshot?.armed ? ' (armed — waiting for the bar)' : ''}
+    </p>
   </section>
 
   <section>
