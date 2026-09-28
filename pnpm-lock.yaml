@@ -69,9 +69,15 @@ importers:
 
   apps/web:
     dependencies:
+      '@vev/engines':
+        specifier: workspace:*
+        version: link:../../packages/engines
       '@vev/shared':
         specifier: workspace:*
         version: link:../../packages/shared
+      hydra-synth:
+        specifier: 1.4.0
+        version: 1.4.0(supports-color@10.2.2)
       valibot:
         specifier: ^1.5.0
         version: 1.5.0(typescript@7.0.2)
