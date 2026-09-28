@@ -296,4 +296,132 @@ describe(startOutput, () => {
     expect(first.tickCalls()).toStrictEqual([])
     expect(second.tickCalls()).toHaveLength(1)
   })
+
+  it('holds a switch until its `at` arrives, rather than applying it at message-receipt time', async () => {
+    const compositor = createFakeCompositor()
+    const scheduler = createFrameScheduler()
+    const channel = new FakeChannel()
+    let currentTime = 1000
+    const now = (): number => currentTime
+
+    const canvas = fakeCanvas()
+    startOutput({
+      cancelFrame: scheduler.cancelFrame,
+      canvas,
+      channel: channel as unknown as BroadcastChannel,
+      createCompositor: () => compositor,
+      now,
+      requestFrame: scheduler.requestFrame,
+      subscribeResize: noResize,
+      viewportSize: fixedViewport,
+    })
+    await vi.waitFor(() => {
+      expect(compositor.mount).toHaveBeenCalledWith(canvas)
+    })
+
+    const message: OutputMessage = {
+      at: 2000,
+      kind: 'switch',
+      to: 'b',
+      transition: { bars: 0, kind: 'cut' },
+    }
+    channel.receive(message)
+
+    currentTime = 1500
+    scheduler.fire()
+    expect(compositor.switchTo).not.toHaveBeenCalled()
+
+    currentTime = 2000
+    scheduler.fire()
+    expect(compositor.switchTo).toHaveBeenCalledWith('b', message.transition, 2000)
+  })
+
+  it('supersedes a pending switch: only the latest message received before `at` reaches the compositor', async () => {
+    const compositor = createFakeCompositor()
+    const scheduler = createFrameScheduler()
+    const channel = new FakeChannel()
+    let currentTime = 1000
+    const now = (): number => currentTime
+
+    const canvas = fakeCanvas()
+    startOutput({
+      cancelFrame: scheduler.cancelFrame,
+      canvas,
+      channel: channel as unknown as BroadcastChannel,
+      createCompositor: () => compositor,
+      now,
+      requestFrame: scheduler.requestFrame,
+      subscribeResize: noResize,
+      viewportSize: fixedViewport,
+    })
+    await vi.waitFor(() => {
+      expect(compositor.mount).toHaveBeenCalledWith(canvas)
+    })
+
+    const first: OutputMessage = { at: 2000, kind: 'switch', to: 'b', transition: { bars: 0, kind: 'cut' } }
+    channel.receive(first)
+    const second: OutputMessage = {
+      at: 2000,
+      kind: 'switch',
+      to: 'a',
+      transition: { bars: 2, kind: 'crossfade' },
+    }
+    channel.receive(second)
+
+    currentTime = 2000
+    scheduler.fire()
+
+    expect(compositor.switchTo).toHaveBeenCalledExactlyOnceWith('a', second.transition, 2000)
+  })
+
+  it('applies an already-due pending switch before a second switch replaces it (the `handleHello` double-switch)', async () => {
+    const compositor = createFakeCompositor()
+    const scheduler = createFrameScheduler()
+    const channel = new FakeChannel()
+    const currentTime = 5000
+    const now = (): number => currentTime
+
+    const canvas = fakeCanvas()
+    startOutput({
+      cancelFrame: scheduler.cancelFrame,
+      canvas,
+      channel: channel as unknown as BroadcastChannel,
+      createCompositor: () => compositor,
+      now,
+      requestFrame: scheduler.requestFrame,
+      subscribeResize: noResize,
+      viewportSize: fixedViewport,
+    })
+    await vi.waitFor(() => {
+      expect(compositor.mount).toHaveBeenCalledWith(canvas)
+    })
+
+    // The restore-cut `handleHello` sends first, `at` already due (its own
+    // publish moment). Received here with no frame in between, matching two
+    // `publish` calls in the same synchronous `handleHello`.
+    const restoreCut: OutputMessage = {
+      at: 5000,
+      kind: 'switch',
+      to: 'a',
+      transition: { bars: 0, kind: 'cut' },
+    }
+    channel.receive(restoreCut)
+    // The resumed crossfade, `at` set to when the fade actually started —
+    // in the past relative to `now`, also already due.
+    const resumeFade: OutputMessage = {
+      at: 4000,
+      kind: 'switch',
+      to: 'b',
+      transition: { bars: 2, kind: 'crossfade' },
+    }
+    channel.receive(resumeFade)
+
+    expect(compositor.switchTo).toHaveBeenCalledOnce()
+    expect(compositor.switchTo).toHaveBeenNthCalledWith(1, 'a', restoreCut.transition, 5000)
+
+    scheduler.fire()
+
+    expect(compositor.switchTo).toHaveBeenCalledTimes(2)
+    expect(compositor.switchTo).toHaveBeenNthCalledWith(2, 'b', resumeFade.transition, 4000)
+  })
 })

@@ -210,6 +210,104 @@ describe(createControl, () => {
     expect(control.getSnapshot().next).toBeUndefined()
   })
 
+  it('re-publishes the switch with the new transition and the same `at` when the toggle changes while armed', () => {
+    const clockNow = createFakeNow(0)
+    const messages: OutputMessage[] = []
+    const control = createControl(
+      (message) => {
+        messages.push(message)
+      },
+      { now: clockNow.now, startClipId: 'quiet' },
+    )
+
+    control.queue('loud')
+    clockNow.set(2500)
+    control.go()
+    const armed = messages.at(-1)
+    expect(armed).toMatchObject({ at: 4000, kind: 'switch', transition: { kind: 'cut' } })
+
+    messages.length = 0
+    control.setTransitionKind('crossfade')
+
+    expect(messages.at(-1)).toStrictEqual({
+      at: 4000,
+      kind: 'switch',
+      to: 'b',
+      transition: { bars: 2, kind: 'crossfade' },
+    })
+  })
+
+  it('does not publish a switch when the toggle changes with nothing armed', () => {
+    const messages: OutputMessage[] = []
+    const control = createControl((message) => {
+      messages.push(message)
+    })
+
+    control.setTransitionKind('crossfade')
+
+    expect(messages).toStrictEqual([])
+  })
+
+  it('hello during an armed Go re-sends the pending switch with its original `at` and transition', () => {
+    const clockNow = createFakeNow(1000)
+    const messages: OutputMessage[] = []
+    const control = createControl(
+      (message) => {
+        messages.push(message)
+      },
+      { now: clockNow.now, startClipId: 'quiet' },
+    )
+
+    control.setTransitionKind('crossfade')
+    control.queue('loud')
+    clockNow.set(1500)
+    control.go()
+    // downbeatAt=1000, 120bpm → a 2000ms bar; 1500 sits mid-bar, so the next
+    // downbeat — and the armed `at` — is 3000.
+    expect(control.getSnapshot().next).toBeDefined()
+
+    messages.length = 0
+    clockNow.set(1800)
+    control.handleHello()
+
+    expect(messages.at(-1)).toStrictEqual({
+      at: 3000,
+      kind: 'switch',
+      to: 'b',
+      transition: { bars: 2, kind: 'crossfade' },
+    })
+  })
+
+  it("hello mid-fade re-sends a switch resuming from the fade's original startedAt", () => {
+    const clockNow = createFakeNow(0)
+    const messages: OutputMessage[] = []
+    const control = createControl(
+      (message) => {
+        messages.push(message)
+      },
+      { now: clockNow.now, startClipId: 'quiet' },
+    )
+
+    control.setTransitionKind('crossfade')
+    control.queue('loud')
+    control.go()
+    // Land on the armed bar (2000) so the fade begins.
+    clockNow.set(2000)
+    control.tick()
+    expect(control.getSnapshot().next).toBeDefined()
+
+    messages.length = 0
+    clockNow.set(2300)
+    control.handleHello()
+
+    expect(messages.at(-1)).toStrictEqual({
+      at: 2000,
+      kind: 'switch',
+      to: 'b',
+      transition: { bars: 2, kind: 'crossfade' },
+    })
+  })
+
   it('answers hello with clock, a load per occupied slot, and a cut switch to the current slot', () => {
     const clockNow = createFakeNow(1000)
     const messages: OutputMessage[] = []

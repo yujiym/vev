@@ -156,7 +156,20 @@ export const createControl = (
   }
 
   const setTransitionKind = (kind: TransitionKind): void => {
-    state = { ...state, transition: transitionFor(kind) }
+    const transition = transitionFor(kind)
+    state = { ...state, transition }
+
+    // A performer changing their mind between Go and the bar landing is
+    // legitimate — the surface that would forbid it (locking the toggle
+    // once armed) is worse than the one that re-publishes. The already-sent
+    // `switch` carried the old transition; without this, the panel would
+    // show the new kind while the output window executes the old one.
+    // Re-publishing with the *same* `at` relies on the output side
+    // superseding cleanly, not queuing behind or double-applying — see
+    // `output-client.ts`'s `startOutput` doc comment.
+    if (state.firing && state.next) {
+      publish({ at: state.firing.at, kind: 'switch', to: state.next.slot, transition })
+    }
     notify()
   }
 
@@ -198,7 +211,33 @@ export const createControl = (
       publishLoad(loaded)
     }
 
+    // Restores exactly what was showing before anything else — see this
+    // message's doc comment in `@vev/shared`'s `output-channel.ts`.
     publish({ at, kind: 'switch', to: state.current.slot, transition: CUT })
+
+    // The restore-cut above is not the whole story if a transition was
+    // already under way: this window's reducer will still complete it
+    // locally on its own next `tick()`, but nothing publishes that unless
+    // it's done here too — a reloaded output window would otherwise sit on
+    // `current` forever, out of sync with a control that thinks the switch
+    // already happened. Progress is derived from a `switch` message's `at`,
+    // not from accumulated deltas (see `output-channel.ts`'s doc comment),
+    // so re-sending the *original* `at` — not `now` — restores the output
+    // to the right point in the transition by construction: a fade re-sent
+    // with its real `startedAt` resumes exactly where it should be, not at
+    // 0%. The output side supersedes the restore-cut above with whichever
+    // of these arrives, since both carry `startOutput`'s "latest wins"
+    // pending-switch semantics.
+    if (state.firing && state.next) {
+      publish({ at: state.firing.at, kind: 'switch', to: state.next.slot, transition: state.transition })
+    } else if (state.fading) {
+      publish({
+        at: state.fading.startedAt,
+        kind: 'switch',
+        to: state.fading.to,
+        transition: state.transition,
+      })
+    }
   }
 
   return {

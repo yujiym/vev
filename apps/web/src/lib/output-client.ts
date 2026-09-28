@@ -6,7 +6,7 @@ import * as v from 'valibot'
 
 type ClockMessage = Extract<OutputMessage, { kind: 'clock' }>
 type LoadMessage = Extract<OutputMessage, { kind: 'load' }>
-type SwitchMessage = Extract<OutputMessage, { kind: 'switch' }>
+export type SwitchMessage = Extract<OutputMessage, { kind: 'switch' }>
 
 export interface OutputHandlers {
   onClock: (message: ClockMessage) => void
@@ -163,6 +163,31 @@ const defaultViewportSize = () => ({
  * type and lint gate (ADR 0001) and this task's own defect (a resize handler
  * that broke rendering on the first fullscreen toggle) was only possible
  * because that logic lived somewhere nothing could check it.
+ *
+ * A `switch` message is never handed to the compositor the moment it
+ * arrives. `Compositor.switchTo` (`HydraCompositor`, `@vev/engines/hydra`)
+ * applies a cut immediately when called — it has no notion of `at` at all —
+ * so calling it on receipt would fire the cut at message-latency after the
+ * press, not on the bar the control scheduled it for; only a crossfade's own
+ * blend-amount clamp happens to hide this, since it reads 0 until wall-clock
+ * `now` reaches `at`. Every `switch` is instead held in `pendingSwitch` and
+ * only forwarded to `switchTo` once `now() >= message.at` — checked once per
+ * frame in `loop`, and also the moment a *new* `switch` arrives, before that
+ * new one overwrites `pendingSwitch`.
+ *
+ * That second check matters for more than the common case. A `switch`
+ * arriving before the held one's `at` supersedes it outright — the held one
+ * is simply replaced, never reaching `switchTo` at all. But
+ * `control.ts`'s `handleHello` answer can publish *two* switches in the same
+ * breath: a cut restoring `current` (`at` effectively "now"), immediately
+ * followed by a second switch resuming an armed or in-flight transition. The
+ * second is not meant to supersede the first away — the first must actually
+ * reach `switchTo` first, so `HydraCompositor`'s `currentSlot` (which a
+ * crossfade's `fromSlot` is read from) is correctly the clip that was
+ * playing, not whatever a freshly constructed compositor defaults to. Since
+ * the restore-cut's `at` is already due by the time the second message is
+ * processed, checking-and-flushing on arrival (not only once per frame)
+ * applies it first, exactly as if a frame had ticked between the two.
  */
 export const startOutput = (options: StartOutputOptions): (() => void) => {
   const {
@@ -176,6 +201,7 @@ export const startOutput = (options: StartOutputOptions): (() => void) => {
     viewportSize = defaultViewportSize,
   } = options
 
+  let pendingSwitch: SwitchMessage | undefined
   let stopped = false
   let disposed = false
   let frame: number | undefined
@@ -190,6 +216,13 @@ export const startOutput = (options: StartOutputOptions): (() => void) => {
   canvas.width = size.width
   canvas.height = size.height
 
+  const flushDueSwitch = (): void => {
+    if (pendingSwitch && now() >= pendingSwitch.at) {
+      compositor?.switchTo(pendingSwitch.to, pendingSwitch.transition, pendingSwitch.at)
+      pendingSwitch = undefined
+    }
+  }
+
   const unsubscribe = subscribeOutput(
     {
       onClock: (message) => {
@@ -201,7 +234,10 @@ export const startOutput = (options: StartOutputOptions): (() => void) => {
         compositor?.load(message.slot, message.clip.code)
       },
       onSwitch: (message) => {
-        compositor?.switchTo(message.to, message.transition, message.at)
+        // Apply an already-due pending switch before this one replaces it —
+        // see the module doc above (the `handleHello` double-switch case).
+        flushDueSwitch()
+        pendingSwitch = message
       },
     },
     channel,
@@ -212,6 +248,7 @@ export const startOutput = (options: StartOutputOptions): (() => void) => {
   })
 
   const loop = (): void => {
+    flushDueSwitch()
     compositor?.tick(now())
     frame = requestFrame(loop)
   }
