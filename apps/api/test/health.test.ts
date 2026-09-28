@@ -18,8 +18,10 @@ describe('GET /api/health', () => {
     expect(parsed.mode).toBe(env.VEV_MODE)
   })
 
-  it('answers 404 for an unknown API route', async () => {
-    const response = await SELF.fetch('https://vev.test/api/nope')
+  it('answers 404 for an unknown API route once past the Access guard', async () => {
+    const response = await SELF.fetch('https://vev.test/api/nope', {
+      headers: { 'Cf-Access-Jwt-Assertion': 'anything-non-empty' },
+    })
     expect(response.status).toBe(404)
   })
 

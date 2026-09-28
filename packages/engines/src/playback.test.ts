@@ -2,7 +2,8 @@
 import { describe, expect, it } from 'vitest'
 
 import type { Clock } from './clock.ts'
-import { initialPlayback, reduce } from './playback.ts'
+import type { PlaybackState } from './playback.ts'
+import { canGo, canGoNow, canQueue, canSetTransition, initialPlayback, reduce } from './playback.ts'
 
 const clock: Clock = { beatsPerBar: 4, bpm: 120, downbeatAt: 0 }
 const cut = { bars: 0, kind: 'cut' } as const
@@ -173,5 +174,69 @@ describe('playback', () => {
     state = reduce(state, { kind: 'tick', now: 6000 }, clock)
     expect(state.current).toStrictEqual({ clipId: 'loud', slot: 'b' })
     expect(state.fading).toBeUndefined()
+  })
+})
+
+/**
+ * The predicates and `reduce` must agree by construction, not by inspection. `reduce` returns the
+ * SAME state object when it refuses an event, so "would this be refused?" is decidable — and each
+ * test below asserts the predicate equals that, over every interesting state rather than over one
+ * hand-picked example. A panel that disables on these predicates is then correct by the same
+ * proof: this is the divergence that cost M1 three fix rounds.
+ */
+const fade = { bars: 2, kind: 'crossfade' } as const
+
+/** Every state worth asking the question in: idle, queued, armed, mid-fade, and armed-with-a-cut. */
+const STATES = (): { name: string; state: PlaybackState }[] => {
+  const idle = initialPlayback('quiet', cut)
+  const queued = reduce(idle, { clipId: 'loud', kind: 'select-next' }, clock)
+  const armed = reduce(queued, { kind: 'go', now: 0 }, clock)
+
+  const fadeIdle = initialPlayback('quiet', fade)
+  const fadeQueued = reduce(fadeIdle, { clipId: 'loud', kind: 'select-next' }, clock)
+  const fadeArmed = reduce(fadeQueued, { kind: 'go', now: 0 }, clock)
+  const fading = reduce(fadeArmed, { kind: 'tick', now: 2000 }, clock)
+
+  return [
+    { name: 'idle, nothing queued', state: idle },
+    { name: 'something queued', state: queued },
+    { name: 'armed for the next bar', state: armed },
+    { name: 'armed with a crossfade', state: fadeArmed },
+    { name: 'mid-crossfade', state: fading },
+  ]
+}
+
+describe('the control predicates and reduce agree', () => {
+  it('mid-crossfade really is one of the states under test', () => {
+    const fading = STATES().find((entry) => entry.name === 'mid-crossfade')
+    expect(fading?.state.fading).toBeDefined()
+  })
+
+  it.each(STATES())('canGo matches whether reduce accepts go — $name', ({ state }) => {
+    expect(canGo(state)).toBe(reduce(state, { kind: 'go', now: 0 }, clock) !== state)
+  })
+
+  it.each(STATES())('canQueue matches whether reduce accepts select-next — $name', ({ state }) => {
+    expect(canQueue(state)).toBe(reduce(state, { clipId: 'third', kind: 'select-next' }, clock) !== state)
+  })
+
+  it.each(STATES())('canSetTransition matches whether reduce accepts set-transition — $name', ({ state }) => {
+    expect(canSetTransition(state)).toBe(
+      reduce(state, { kind: 'set-transition', transition: fade }, clock) !== state,
+    )
+  })
+
+  it.each(STATES())('canGoNow matches whether reduce accepts go-now — $name', ({ state }) => {
+    expect(canGoNow(state)).toBe(reduce(state, { kind: 'go-now', now: 0 }, clock) !== state)
+  })
+
+  it('refuses Go once one is already armed, which a fade-only guard would allow', () => {
+    const armed = STATES().find((entry) => entry.name === 'armed for the next bar')
+    expect(armed?.state.fading).toBeUndefined()
+    expect(canGo(armed!.state)).toBe(false)
+  })
+
+  it('refuses Go with nothing queued, which a fade-only guard would also allow', () => {
+    expect(canGo(initialPlayback('quiet', cut))).toBe(false)
   })
 })

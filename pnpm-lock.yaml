@@ -38,6 +38,15 @@ importers:
 
   apps/api:
     dependencies:
+      '@hono/valibot-validator':
+        specifier: ^0.6.1
+        version: 0.6.1(hono@4.13.9)(valibot@1.5.0(typescript@7.0.2))
+      '@vev/engines':
+        specifier: workspace:*
+        version: link:../../packages/engines
+      '@vev/ingest':
+        specifier: workspace:*
+        version: link:../../packages/ingest
       '@vev/shared':
         specifier: workspace:*
         version: link:../../packages/shared
@@ -72,6 +81,9 @@ importers:
       '@vev/engines':
         specifier: workspace:*
         version: link:../../packages/engines
+      '@vev/ingest':
+        specifier: workspace:*
+        version: link:../../packages/ingest
       '@vev/shared':
         specifier: workspace:*
         version: link:../../packages/shared
@@ -106,6 +118,19 @@ importers:
       hydra-synth:
         specifier: 1.4.0
         version: 1.4.0(supports-color@10.2.2)
+    devDependencies:
+      vitest:
+        specifier: 4.1.11
+        version: 4.1.11(@types/node@24.13.6)(@vitest/browser-preview@4.1.11)(esbuild@0.28.1)(tsx@4.23.15)(typescript@7.0.2)(yaml@2.9.1)
+
+  packages/ingest:
+    dependencies:
+      '@vev/engines':
+        specifier: workspace:*
+        version: link:../engines
+      '@vev/shared':
+        specifier: workspace:*
+        version: link:../shared
     devDependencies:
       vitest:
         specifier: 4.1.11
@@ -682,6 +707,12 @@ packages:
     engines: {node: '>=18'}
     cpu: [x64]
     os: [win32]
+
+  '@hono/valibot-validator@0.6.1':
+    resolution: {integrity: sha512-rqKhQJI8IVR8gRRNHHf2wGtIT7sKEqV1KoGL5f2SocNytl+tBNn4EtRu4zfk/D6axgWSswnaxeiuJhM5yNFrCg==}
+    peerDependencies:
+      hono: '>=3.9.0'
+      valibot: ^1.0.0 || ^1.0.0-beta.4 || ^1.0.0-rc
 
   '@img/colour@1.1.0':
     resolution: {integrity: sha512-Td76q7j57o/tLVdgS746cYARfSyxk8iEfRxewL9h4OMzYhbW4TAcppl0mT4eyqXddh6L/jwoM75mo7ixa/pCeQ==}
@@ -3144,6 +3175,11 @@ snapshots:
 
   '@esbuild/win32-x64@0.28.1':
     optional: true
+
+  '@hono/valibot-validator@0.6.1(hono@4.13.9)(valibot@1.5.0(typescript@7.0.2))':
+    dependencies:
+      hono: 4.13.9
+      valibot: 1.5.0(typescript@7.0.2)
 
   '@img/colour@1.1.0': {}
 
