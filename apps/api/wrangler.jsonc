@@ -85,6 +85,22 @@
           "migrations_dir": "migrations",
         },
       ],
+      // Custom domain for the preview (M1 task 6 follow-up): follows this
+      // environment's STABLE deployment, exactly like vev-preview.<subdomain>
+      // .workers.dev does — a `versions upload` alone (deploy:preview) never
+      // moves it, only `wrangler versions deploy` (or a `deploy`/`triggers
+      // deploy`) does. Deliberately NOT vev.0x7.sh: that is the production
+      // hostname and the production Worker does not exist yet (M12).
+      "routes": [{ "pattern": "vev-preview.0x7.sh", "custom_domain": true }],
+      // Adding `routes` makes Wrangler default `workers_dev` (and, with it,
+      // `preview_urls`) to false on the NEXT deploy that changes triggers —
+      // verified empirically: the first `deploy --env preview` after adding
+      // `routes` above disabled the `vev-preview.host3.workers.dev` stable
+      // URL and returned error 1042 on it. Both are set back to true here so
+      // the custom domain is additive, not a replacement: the workers.dev
+      // stable URL and every `versions upload` preview URL keep working.
+      "workers_dev": true,
+      "preview_urls": true,
     },
   },
 }
