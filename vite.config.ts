@@ -72,6 +72,11 @@ export default defineConfig({
           // Same latitude for the `env as unknown as Env` casts the
           // vitest-pool-workers harness forces in test setup and fixtures:
           'typescript/no-unsafe-type-assertion': 'off',
+          // `cloudflare:test`'s `env` and `SELF` are deprecated in favour of
+          // `cloudflare:workers`'s request-scoped API, which does not work in
+          // top-level test setup or outside a request — tests keep using the
+          // harness API instead:
+          'typescript/no-deprecated': 'off',
         },
       },
       // Cloudflare Worker entry code runs in the workerd global scope:
