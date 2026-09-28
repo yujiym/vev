@@ -7,7 +7,7 @@ export const slotSchema = v.picklist(['a', 'b'])
 /** M1 renders two of the transitions in spec §9.1; the rest arrive with later milestones. */
 export const transitionSpecSchema = v.object({
   /** How long the transition takes. 0 is immediate, which is what a cut is. */
-  bars: v.pipe(v.number(), v.minValue(0)),
+  bars: v.pipe(v.number(), v.finite(), v.minValue(0)),
   kind: v.picklist(['cut', 'crossfade']),
 })
 

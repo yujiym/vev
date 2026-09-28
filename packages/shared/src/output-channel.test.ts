@@ -44,4 +44,23 @@ describe('output channel messages', () => {
   it('rejects a message with no kind at all', () => {
     expect(v.safeParse(outputMessageSchema, { clip, slot: 'a' }).success).toBe(false)
   })
+
+  it('rejects Infinity in clock.bpm', () => {
+    const result = v.safeParse(outputMessageSchema, {
+      beatsPerBar: 4,
+      bpm: Infinity,
+      downbeatAt: 0,
+      kind: 'clock',
+    })
+    expect(result.success).toBe(false)
+  })
+
+  it('rejects whitespace-only string in clip.code', () => {
+    const result = v.safeParse(outputMessageSchema, {
+      clip: { code: '   ', id: 'blank' },
+      kind: 'load',
+      slot: 'a',
+    })
+    expect(result.success).toBe(false)
+  })
 })

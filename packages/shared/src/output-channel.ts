@@ -15,7 +15,11 @@ import { slotSchema, transitionSpecSchema } from './playback-types.ts'
 export const OUTPUT_CHANNEL = 'vev:output'
 
 const clipSchema = v.object({
-  code: v.pipe(v.string(), v.minLength(1)),
+  code: v.pipe(
+    v.string(),
+    v.minLength(1),
+    v.check((s) => /\S/u.test(s), 'Must contain at least one non-whitespace character'),
+  ),
   id: v.pipe(v.string(), v.minLength(1)),
 })
 
@@ -41,7 +45,7 @@ export const outputMessageSchema = v.variant('kind', [
   /** Tempo and downbeat, so the output window can derive bar phase itself. */
   v.object({
     beatsPerBar: v.pipe(v.number(), v.integer(), v.minValue(1)),
-    bpm: v.pipe(v.number(), v.minValue(1)),
+    bpm: v.pipe(v.number(), v.finite(), v.minValue(1)),
     downbeatAt: v.number(),
     kind: v.literal('clock'),
   }),
