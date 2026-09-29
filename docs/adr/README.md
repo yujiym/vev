@@ -15,3 +15,4 @@ ADRs are append-only. A decision that changes is recorded as a new ADR that supe
 - [0005 — Annotation as typed questions](0005-annotation-as-typed-questions.md): most of a clip's metadata is asked of `typesafe/jev` as typed `score` / `choice` / `noul` questions over a fixed tag vocabulary rather than generated as prose, `palette` is read from the rendered frames, and `description` is the one field that is generated.
 - [0006 — cf as the Cloudflare CLI](0006-cf-cli.md): TypeScript Worker configuration and cf commands, with Wrangler retained for bundling and local D1 compatibility.
 - [0007 — Replace the local D1 identity](0007-local-d1-identity.md): preserve existing data under a valid local UUID, remove Wrangler D1 commands, and fix Miniflare watcher lifetime for cf CLI shutdown.
+- [0008 — Cloudflare Vite plugin for the API](0008-cloudflare-vite-plugin.md): remove the Wrangler config and direct dependency while retaining separate web and API packages.
