@@ -28,7 +28,7 @@ allowBuilds:
 # that date ("newest date supported by this server binary is 2026-08-22"),
 # which would otherwise force the *shipped* compatibility date down to match a
 # *test-only* limitation. Forcing the pool onto the newer miniflare/workerd
-# already resolved elsewhere in the tree (via wrangler's own dependency) lets
+# already resolved elsewhere in the tree (via cf and its Vite plugin) lets
 # the Worker's compatibility date stay current. Drop these once
 # @cloudflare/vitest-pool-workers ships a release bundling a newer runtime.
 overrides:
@@ -48,12 +48,8 @@ minimumReleaseAgeExclude:
   # published within the minimumReleaseAge window at install time, so it must be
   # excluded explicitly rather than lowering the global cutoff.
   - ultracite@7.12.1
-  # The apps/api Task 3 brief pins wrangler@^4.142.0 and
-  # @cloudflare/workers-types@^5.20260928.1; both, and the workerd/miniflare
-  # releases wrangler pulls in transitively, were published within the
-  # minimumReleaseAge window at install time, so they must be excluded
-  # explicitly rather than lowering the global cutoff.
-  - wrangler@4.142.0
+  # Worker types and the shared runtime were published within the release-age
+  # window at install time. Keep exceptions scoped to these exact versions.
   - '@cloudflare/workers-types@5.20260928.1'
   - workerd@1.20260926.1
   - '@cloudflare/workerd-darwin-64@1.20260926.1'
@@ -68,5 +64,7 @@ minimumReleaseAgeExclude:
   - '@cloudflare/codemods@0.2.1'
   - '@cloudflare/config@0.20.0'
   - '@cloudflare/runtime-types@0.1.4'
+  # cf requires the v2 Vite plugin beta for its local runtime and build output.
+  - '@cloudflare/vite-plugin@2.0.0-beta.sha-ad79608dd'
 patchedDependencies:
   miniflare@5.20260926.0-alpha: patches/miniflare@5.20260926.0-alpha.patch

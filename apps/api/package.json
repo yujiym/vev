@@ -5,8 +5,8 @@
   "license": "AGPL-3.0-or-later",
   "type": "module",
   "scripts": {
-    "dev": "pnpm migrate:local && VEV_ASSETS_DIRECTORY=./dev-assets cf dev --mode local -- --ip 127.0.0.1 --port 8787 --persist-to .wrangler/state",
-    "live": "pnpm migrate:local && cf dev --mode local -- --ip 127.0.0.1 --port 8787 --persist-to .wrangler/state",
+    "dev": "pnpm migrate:local && VEV_ASSETS_DIRECTORY=./dev-assets cf dev --mode development",
+    "live": "pnpm migrate:local && cf dev --mode development",
     "deploy": "cf deploy",
     "deploy:preview": "GIT_COMMIT=$(git rev-parse --short HEAD) cf workers versions create --mode preview",
     "test": "vp test",
@@ -25,11 +25,11 @@
     "valibot": "^1.5.0"
   },
   "devDependencies": {
+    "@cloudflare/vite-plugin": "2.0.0-beta.sha-ad79608dd",
     "@cloudflare/vitest-pool-workers": "^0.22.0",
     "@cloudflare/workers-types": "^5.20260928.1",
     "cf": "1.0.0-beta.5",
     "drizzle-kit": "^0.31.11",
-    "vitest": "4.1.11",
-    "wrangler": "^4.142.0"
+    "vitest": "4.1.11"
   }
 }

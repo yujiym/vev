@@ -2,7 +2,7 @@
 import { bindings, defineConfig, triggers } from 'cf/config'
 
 export default defineConfig(({ mode }) => {
-  const local = mode === 'local'
+  const local = mode === 'development'
   const preview = mode === 'preview'
   const cloudDatabaseId = preview
     ? 'bcee626b-7dbd-4456-8fb9-a708583e6e1d'

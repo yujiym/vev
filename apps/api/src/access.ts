@@ -23,10 +23,10 @@ import type { Env } from './env.ts'
  *
  * Disabled whenever `VEV_MODE` is 'local': local mode has no Cloudflare
  * Access by design (§15.3), and the Worker binds to loopback only, so there
- * is no Access assertion to check. `pnpm live` runs `--env local`, so this
+ * is no Access assertion to check. `pnpm live` runs `--mode development`, so this
  * check is off there. The `apps/api` test pool's `VEV_MODE` is `'cloud'`,
- * NOT `'local'`, even though `vite.config.ts` reads the
- * `'local'` configuration for D1/migrations — its `miniflare.bindings` overrides
+ * NOT `'local'`, even though `vitest.config.ts` reads the
+ * `'development'` configuration for D1/migrations — its `miniflare.bindings` overrides
  * `VEV_MODE` explicitly, the same way it overrides `GIT_COMMIT`. So this
  * check runs enabled in every `apps/api` test: an owner-route test needs a
  * real (non-blank) `Cf-Access-Jwt-Assertion` header or it 403s.

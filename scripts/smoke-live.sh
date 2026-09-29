@@ -12,7 +12,7 @@
 # too instead of only being caught by a script that quietly duplicates it.
 set -euo pipefail
 set -m # `pnpm live` gets its own process group, so the EXIT trap can kill
-       # the whole wrangler/workerd tree it spawns, not just the immediate
+       # the whole cf/Vite/workerd tree it spawns, not just the immediate
        # `pnpm` process (portable: works without setsid on Linux and macOS).
 
 root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

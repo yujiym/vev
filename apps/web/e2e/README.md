@@ -11,7 +11,7 @@ Three scripts that open the M2 screens in a real Chromium and assert on what is 
 Start the app first, in another terminal — the built SPA served by the local Worker, which is one origin for both the pages and the API:
 
 ```bash
-pnpm live          # builds apps/web, then cf dev --mode local on 127.0.0.1:8787
+pnpm live          # builds apps/web, then cf dev --mode development on 127.0.0.1:8787
 ```
 
 Then, from the repository root:
