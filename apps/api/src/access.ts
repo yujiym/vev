@@ -14,7 +14,7 @@ import type { Env } from './env.ts'
  * (403) when it is missing or blank. It does not decode the token, and it
  * does not check its signature, issuer, audience or expiry against
  * `ACCESS_TEAM_DOMAIN` / `ACCESS_AUD` — those vars are declared on `Env`
- * and populated in `wrangler.jsonc` for the day full JWT verification
+ * and populated in `cloudflare.config.ts` for the day full JWT verification
  * (fetching and caching the team's JWKS, checking signature/iss/aud) lands;
  * that stretch did not land cleanly (no way to mint a real signed Access
  * JWT to test against, and Access's own edge redirect means `curl` never
@@ -25,8 +25,8 @@ import type { Env } from './env.ts'
  * Access by design (§15.3), and the Worker binds to loopback only, so there
  * is no Access assertion to check. `pnpm live` runs `--env local`, so this
  * check is off there. The `apps/api` test pool's `VEV_MODE` is `'cloud'`,
- * NOT `'local'`, even though `vite.config.ts` points `wrangler.environment`
- * at `'local'` for D1/migrations — its `miniflare.bindings` overrides
+ * NOT `'local'`, even though `vite.config.ts` reads the
+ * `'local'` configuration for D1/migrations — its `miniflare.bindings` overrides
  * `VEV_MODE` explicitly, the same way it overrides `GIT_COMMIT`. So this
  * check runs enabled in every `apps/api` test: an owner-route test needs a
  * real (non-blank) `Cf-Access-Jwt-Assertion` header or it 403s.

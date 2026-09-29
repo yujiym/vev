@@ -8,6 +8,7 @@ node_modules/
 build/
 dist/
 .wrangler/
+.cloudflare/
 .dev.vars
 .env
 .env.*

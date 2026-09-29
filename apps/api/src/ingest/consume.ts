@@ -20,7 +20,7 @@ import { annotateClip } from './annotate.ts'
  *   `annotationStatus: 'failed'` and ACKS. The clip keeps every field it already had; nothing else
  *   on the row is touched.
  * - Only a STORAGE failure retries — D1 being unavailable is transient and worth another attempt —
- *   and `max_retries: 2` in `wrangler.jsonc` bounds even that.
+ *   and `maxRetries: 2` in `cloudflare.config.ts` bounds even that.
  */
 
 /** The queue message. One clip id; everything else the consumer reads from the row itself. */

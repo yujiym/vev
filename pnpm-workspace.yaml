@@ -23,7 +23,7 @@ allowBuilds:
 #
 # @cloudflare/vitest-pool-workers@0.22.0 pins its own bundled miniflare/workerd
 # to 5.20260815.0-alpha / 1.20260815.1 — older than the compatibility date
-# apps/api's Worker ships with (wrangler.jsonc's compatibility_date). Without
+# apps/api's Worker ships with (cloudflare.config.ts's compatibilityDate). Without
 # these overrides the test harness's bundled runtime can't start a Worker on
 # that date ("newest date supported by this server binary is 2026-08-22"),
 # which would otherwise force the *shipped* compatibility date down to match a
@@ -62,3 +62,11 @@ minimumReleaseAgeExclude:
   - '@cloudflare/workerd-linux-arm64@1.20260926.1'
   - '@cloudflare/workerd-windows-64@1.20260926.1'
   - miniflare@5.20260926.0-alpha
+  # cf's launch beta and its exact Cloudflare dependencies are required for migration.
+  - cf@1.0.0-beta.5
+  - '@cloudflare/build-output-utils@0.8.2'
+  - '@cloudflare/codemods@0.2.1'
+  - '@cloudflare/config@0.20.0'
+  - '@cloudflare/runtime-types@0.1.4'
+patchedDependencies:
+  miniflare@5.20260926.0-alpha: patches/miniflare@5.20260926.0-alpha.patch

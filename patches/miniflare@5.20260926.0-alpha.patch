@@ -1,0 +1,13 @@
+diff --git a/dist/src/index.js b/dist/src/index.js
+index 461f22f6f2905ff8ce92d8ee3347ce6455b2794e..1cffad1eb4c0c1983d4c9075b0a7cf78f56ba311 100644
+--- a/dist/src/index.js
++++ b/dist/src/index.js
+@@ -120855,6 +120855,8 @@ var DevRegistry = class {
+     (0, import_node_fs21.mkdirSync)(this.registryPath, { recursive: true });
+     if (!this.watcher) {
+       const watcher = watch(this.registryPath, {
++        // Registry discovery must not keep a completed local CLI command alive.
++        persistent: false,
+         // On Windows, chokidar's default `fs.watch` backend
+         // (`ReadDirectoryChangesW`) frequently drops or delays create
+         // events for files added shortly after the watcher attaches —

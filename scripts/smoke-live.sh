@@ -8,7 +8,7 @@
 # yourself: `bash scripts/smoke-live.sh`.
 #
 # It runs `pnpm live` itself rather than reimplementing its steps (build,
-# migrate, `wrangler dev`), so a regression in that script fails this check
+# migrate, `cf dev`), so a regression in that script fails this check
 # too instead of only being caught by a script that quietly duplicates it.
 set -euo pipefail
 set -m # `pnpm live` gets its own process group, so the EXIT trap can kill

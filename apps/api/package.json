@@ -5,15 +5,15 @@
   "license": "AGPL-3.0-or-later",
   "type": "module",
   "scripts": {
-    "dev": "wrangler d1 migrations apply vev --local && wrangler dev --env local --ip 127.0.0.1 --port 8787 --assets ./dev-assets",
-    "live": "wrangler d1 migrations apply vev --local && wrangler dev --env local --ip 127.0.0.1 --port 8787",
-    "deploy": "wrangler deploy",
-    "deploy:preview": "wrangler versions upload --env preview --var GIT_COMMIT:$(git rev-parse --short HEAD)",
+    "dev": "pnpm migrate:local && VEV_ASSETS_DIRECTORY=./dev-assets cf dev --mode local -- --ip 127.0.0.1 --port 8787 --persist-to .wrangler/state",
+    "live": "pnpm migrate:local && cf dev --mode local -- --ip 127.0.0.1 --port 8787 --persist-to .wrangler/state",
+    "deploy": "cf deploy",
+    "deploy:preview": "GIT_COMMIT=$(git rev-parse --short HEAD) cf workers versions create --mode preview",
     "test": "vp test",
     "db:generate": "drizzle-kit generate",
-    "migrate:local": "wrangler d1 migrations apply vev --local",
-    "migrate:remote": "wrangler d1 migrations apply vev --remote",
-    "migrate:preview": "wrangler d1 migrations apply vev-preview --env preview --remote"
+    "migrate:local": "cf d1 migrations apply 9b91c754-01f5-4399-98a7-bc8b5c9e65e8 --local --persist-to .wrangler/state --dir migrations",
+    "migrate:remote": "cf d1 migrations apply 00000000-0000-0000-0000-000000000000 --dir migrations",
+    "migrate:preview": "cf d1 migrations apply bcee626b-7dbd-4456-8fb9-a708583e6e1d --dir migrations"
   },
   "dependencies": {
     "@hono/valibot-validator": "^0.6.1",
@@ -27,6 +27,7 @@
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.22.0",
     "@cloudflare/workers-types": "^5.20260928.1",
+    "cf": "1.0.0-beta.5",
     "drizzle-kit": "^0.31.11",
     "vitest": "4.1.11",
     "wrangler": "^4.142.0"
