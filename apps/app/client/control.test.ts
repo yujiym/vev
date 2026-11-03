@@ -611,6 +611,93 @@ describe('the picture obeys the reducer', () => {
     control.tick()
     expect(switches(messages)).toStrictEqual([{ at: 516, kind: 'switch', to: 'a', transition: CUT_SPEC }])
   })
+
+  it('Back’s cut waits for the reloaded clip to render even when a candidate is staged at once', () => {
+    const clockNow = createFakeNow(0)
+    const { control, messages } = bare({
+      clips: [...FIXTURES, { code: 'third()', id: 'third', title: 'Third' }],
+      now: clockNow.now,
+    })
+
+    control.stage('loud')
+    control.goNow()
+    control.tick()
+    control.tick()
+    control.tick()
+    control.stage('third')
+    control.tick()
+    control.tick()
+    expect(control.getSnapshot()).toMatchObject({ current: { clipId: 'loud', slot: 'b' } })
+
+    messages.length = 0
+    clockNow.set(500)
+    control.back()
+    // What the live screen does the moment a landing or a Back is reported.
+    control.stage('third')
+
+    expect(messages).toStrictEqual([{ code: FIXTURES[0].code, kind: 'load', slot: 'a' }])
+
+    clockNow.set(516)
+    control.tick()
+    expect(switches(messages)).toStrictEqual([])
+    clockNow.set(532)
+    control.tick()
+    expect(messages).toStrictEqual([
+      { code: FIXTURES[0].code, kind: 'load', slot: 'a' },
+      { at: 532, kind: 'switch', to: 'a', transition: CUT_SPEC },
+      { code: 'third()', kind: 'load', slot: 'b' },
+    ])
+    expect(control.getSnapshot().next).toMatchObject({ clipId: 'third', ready: false })
+  })
+
+  it('a staged clip fires two frames after its own load, not after the Back’s', () => {
+    const clockNow = createFakeNow(0)
+    const { control, messages } = bare({ now: clockNow.now })
+
+    control.stage('loud')
+    control.goNow()
+    control.tick()
+    control.tick()
+    control.tick()
+    control.back()
+    control.stage('loud')
+    control.goNow()
+    messages.length = 0
+    // Two frames cut the Back's clip in and load the staged one, two more render it, and the
+    // reducer fires on the frame after that.
+    for (const at of [16, 32, 48, 64]) {
+      clockNow.set(at)
+      control.tick()
+    }
+    expect(switches(messages).map((call) => call.to)).toStrictEqual(['a'])
+
+    clockNow.set(80)
+    control.tick()
+    expect(switches(messages).map((call) => call.to)).toStrictEqual(['a', 'b'])
+  })
+
+  it('a second Back while the first cut is waiting is refused, and says so through canBack', () => {
+    const clockNow = createFakeNow(0)
+    const { control } = bare({
+      clips: [...FIXTURES, { code: 'third()', id: 'third', title: 'Third' }],
+      now: clockNow.now,
+    })
+
+    for (const clipId of ['loud', 'third']) {
+      control.stage(clipId)
+      control.goNow()
+      control.tick()
+      control.tick()
+      control.tick()
+    }
+    control.back()
+
+    expect(control.getSnapshot().canBack).toBe(false)
+    control.back()
+    control.tick()
+    control.tick()
+    expect(control.getSnapshot()).toMatchObject({ canBack: true, current: { clipId: 'loud' } })
+  })
 })
 
 /**
@@ -1237,10 +1324,13 @@ describe('transport controls', () => {
     }
     expect(control.getSnapshot().current.clipId).toBe('extra-2')
 
+    // Each Back waits for its clip to render before the next is taken, so a frame passes between them.
     control.back()
     expect(control.getSnapshot()).toMatchObject({ current: { clipId: 'extra-1' }, track: { index: 0 } })
+    control.tick()
     control.back()
     expect(control.getSnapshot()).toMatchObject({ current: { clipId: 'one' }, track: { index: 0 } })
+    control.tick()
     control.back()
     expect(control.getSnapshot()).toMatchObject({ current: { clipId: 'start' }, track: undefined })
   })

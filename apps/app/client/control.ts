@@ -313,6 +313,11 @@ export const createControl = (picture: Picture, options: CreateControlOptions = 
   let pictureFault: string | undefined
   /** A Back's cut, waiting for the buffer it just reloaded to render. */
   let backCut: Slot | undefined
+  /**
+   * A staged clip's load, held back while a Back's cut waits. The staged clip's slot is the one still
+   * on screen until that cut, so loading into it earlier would draw over the picture.
+   */
+  let deferredLoad: Loaded | undefined
   let notifiedState: PlaybackState | undefined
   let notifiedAt = Number.NEGATIVE_INFINITY
 
@@ -334,7 +339,8 @@ export const createControl = (picture: Picture, options: CreateControlOptions = 
       barPhase: barPhase(clock, at),
       beatsPerBar: clock.beatsPerBar,
       bpm: clock.bpm,
-      canBack: canBack(state),
+      // One Back at a time: a second would reload over the buffer the first one's cut is waiting on.
+      canBack: canBack(state) && backCut === undefined,
       canGo: canGo(state),
       canGoNow: canGoNow(state),
       canQueue: canQueue(state),
@@ -383,11 +389,6 @@ export const createControl = (picture: Picture, options: CreateControlOptions = 
       return false
     }
 
-    if (backCut !== undefined) {
-      // The new load takes the slot on screen, so the waiting cut has to happen first.
-      picture.switchTo(backCut, CUT, now())
-      backCut = undefined
-    }
     try {
       picture.load(loaded.slot, clip.code)
     } catch (error) {
@@ -397,6 +398,15 @@ export const createControl = (picture: Picture, options: CreateControlOptions = 
     }
     framesSinceLoad = 0
     pictureFault = undefined
+    return true
+  }
+
+  /** A staged clip's load, or its place in line behind a Back's cut, which needs the picture to itself first. */
+  const loadStaged = (loaded: Loaded): boolean => {
+    if (backCut === undefined) {
+      return loadSlot(loaded)
+    }
+    deferredLoad = loaded
     return true
   }
 
@@ -478,8 +488,15 @@ export const createControl = (picture: Picture, options: CreateControlOptions = 
     followTrack(before)
 
     const { next } = state
-    if (next && (before.next?.clipId !== next.clipId || before.next.slot !== next.slot) && !loadSlot(next)) {
+    if (
+      next &&
+      (before.next?.clipId !== next.clipId || before.next.slot !== next.slot) &&
+      !loadStaged(next)
+    ) {
       state = reduce(state, { kind: 'unstage' }, clock)
+    }
+    if (state.next === undefined) {
+      deferredLoad = undefined
     }
   }
 
@@ -547,6 +564,10 @@ export const createControl = (picture: Picture, options: CreateControlOptions = 
    * cut waits for that buffer to render (`renderFrame`), or Back would flash black on the way.
    */
   const back = (): void => {
+    if (backCut !== undefined) {
+      notify()
+      return
+    }
     const before = state
     const after = reduce(state, { kind: 'back' }, clock)
     if (after === before || !loadSlot(after.current)) {
@@ -724,12 +745,21 @@ export const createControl = (picture: Picture, options: CreateControlOptions = 
     }
 
     framesSinceLoad += 1
-    if (framesSinceLoad >= READY_FRAMES) {
-      if (backCut !== undefined) {
-        picture.switchTo(backCut, CUT, at)
-        backCut = undefined
-      }
+    if (framesSinceLoad < READY_FRAMES) {
+      return
+    }
+    if (backCut === undefined) {
       dispatch({ kind: 'next-ready' })
+      return
+    }
+
+    picture.switchTo(backCut, CUT, at)
+    backCut = undefined
+    // The staged clip loads now that the picture is off its slot, and has its own frames to render.
+    const pending = deferredLoad
+    deferredLoad = undefined
+    if (pending !== undefined && !loadSlot(pending)) {
+      state = reduce(state, { kind: 'unstage' }, clock)
     }
   }
 
