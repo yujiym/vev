@@ -1,0 +1,89 @@
+{
+  "version": 1,
+  "source": {
+    "compatibility_date": "2026-09-01",
+    "compatibility_flags": [
+      "nodejs_compat"
+    ],
+    "ai": {
+      "binding": "AI"
+    },
+    "d1_databases": [
+      {
+        "binding": "DB",
+        "database_id": "bcee626b-7dbd-4456-8fb9-a708583e6e1d",
+        "database_name": "vev-preview",
+        "migrations_dir": "./db/migrations"
+      }
+    ],
+    "name": "vev-preview",
+    "preview_urls": false,
+    "r2_buckets": [
+      {
+        "binding": "MEDIA",
+        "bucket_name": "vev-media-preview"
+      }
+    ],
+    "routes": [
+      {
+        "custom_domain": true,
+        "pattern": "vev-preview.0x7.sh"
+      }
+    ],
+    "vars": {
+      "ACCESS_AUD": "2751fc6207bcfd7f632e739f25ffd5a12a8325b4fcd8825fb9cbeac9bdf01ffd",
+      "ACCESS_TEAM_DOMAIN": "710gs.cloudflareaccess.com",
+      "SOURCE_URL": "https://github.com/yujiym/vev",
+      "VEV_MODE": "cloud",
+      "GIT_COMMIT": "5e7f9de"
+    },
+    "version_metadata": {
+      "binding": "CF_VERSION_METADATA"
+    },
+    "workers_dev": false
+  },
+  "resolved": {
+    "compatibility_date": "2026-09-01",
+    "compatibility_flags": [
+      "nodejs_compat"
+    ],
+    "ai": {
+      "binding": "AI"
+    },
+    "d1_databases": [
+      {
+        "binding": "DB",
+        "database_id": "bcee626b-7dbd-4456-8fb9-a708583e6e1d",
+        "database_name": "vev-preview",
+        "migrations_dir": "./db/migrations"
+      }
+    ],
+    "name": "vev-preview",
+    "preview_urls": false,
+    "r2_buckets": [
+      {
+        "binding": "MEDIA",
+        "bucket_name": "vev-media-preview"
+      }
+    ],
+    "routes": [
+      {
+        "custom_domain": true,
+        "pattern": "vev-preview.0x7.sh"
+      }
+    ],
+    "vars": {
+      "ACCESS_AUD": "2751fc6207bcfd7f632e739f25ffd5a12a8325b4fcd8825fb9cbeac9bdf01ffd",
+      "ACCESS_TEAM_DOMAIN": "710gs.cloudflareaccess.com",
+      "SOURCE_URL": "https://github.com/yujiym/vev",
+      "VEV_MODE": "cloud",
+      "GIT_COMMIT": "5e7f9de"
+    },
+    "version_metadata": {
+      "binding": "CF_VERSION_METADATA"
+    },
+    "workers_dev": false,
+    "account_id": "4d8de8be5b03d5f77ca1be4e3c0db5b2"
+  },
+  "text": "{\n  \"compatibility_date\": \"2026-09-01\",\n  \"compatibility_flags\": [\n    \"nodejs_compat\"\n  ],\n  \"ai\": {\n    \"binding\": \"AI\"\n  },\n  \"d1_databases\": [\n    {\n      \"binding\": \"DB\",\n      \"database_id\": \"bcee626b-7dbd-4456-8fb9-a708583e6e1d\",\n      \"database_name\": \"vev-preview\",\n      \"migrations_dir\": \"./db/migrations\"\n    }\n  ],\n  \"name\": \"vev-preview\",\n  \"preview_urls\": false,\n  \"r2_buckets\": [\n    {\n      \"binding\": \"MEDIA\",\n      \"bucket_name\": \"vev-media-preview\"\n    }\n  ],\n  \"routes\": [\n    {\n      \"custom_domain\": true,\n      \"pattern\": \"vev-preview.0x7.sh\"\n    }\n  ],\n  \"vars\": {\n    \"ACCESS_AUD\": \"2751fc6207bcfd7f632e739f25ffd5a12a8325b4fcd8825fb9cbeac9bdf01ffd\",\n    \"ACCESS_TEAM_DOMAIN\": \"710gs.cloudflareaccess.com\",\n    \"SOURCE_URL\": \"https://github.com/yujiym/vev\",\n    \"VEV_MODE\": \"cloud\",\n    \"GIT_COMMIT\": \"5e7f9de\"\n  },\n  \"version_metadata\": {\n    \"binding\": \"CF_VERSION_METADATA\"\n  },\n  \"workers_dev\": false,\n  \"account_id\": \"4d8de8be5b03d5f77ca1be4e3c0db5b2\"\n}\n"
+}
