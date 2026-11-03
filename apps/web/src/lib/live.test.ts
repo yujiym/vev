@@ -80,10 +80,19 @@ const summary = (id: string, title: string): ClipSummary => ({
   slug: id,
   title,
 })
-// SAFETY: the live screen reads only `id`, `code` and `title` from a fetched clip; the rest of the
-// record is irrelevant to every assertion here.
-const clip = (id: string, title = id.toUpperCase()): Clip =>
-  ({ code: 'osc().out()', id, title }) as unknown as Clip
+// SAFETY: the live screen reads only the fields below from a fetched clip (`fetchClip` has already
+// parsed a real one); the rest of the record is irrelevant to every assertion here.
+const clip = (id: string, title = id.toUpperCase(), usesFeedback = false): Clip =>
+  ({
+    annotationStatus: 'ok',
+    code: 'osc().out()',
+    deps: { usesFeedback },
+    energy: 3,
+    engine: 'hydra',
+    id,
+    reviewed: true,
+    title,
+  }) as unknown as Clip
 /** A fake network call: it settles after a microtask, as a real fetch does, never synchronously. */
 const delayed = async <T>(value: T): Promise<T> => {
   await Promise.resolve()
@@ -572,6 +581,28 @@ describe('createLive with a track and an armed switch', () => {
       historyIds: ['a', 'x'],
       recentTransitions: ['crossfade', 'cut'],
     })
+  })
+
+  it('cuts to a feedback clip the response ranked second, as spec 9.2 requires', async () => {
+    const control = createControl(() => {}, {
+      clips: [playable('a')],
+      startClipId: 'a',
+    })
+    const live = createLive({
+      control,
+      fetchCandidates: async () => await delayed(response(['lead', 'plain', 'feedback'])),
+      fetchClipById: async (id) => await delayed(clip(id, id, id === 'feedback')),
+      fetchLibrarySummaries: async () => await delayed([summary('a', 'A')]),
+    })
+    await vi.waitFor(() => {
+      expect(live.getSnapshot().live.load).toBe('ok')
+    })
+
+    live.pickCandidate('plain')
+    expect(live.getSnapshot().live.next?.transition).toStrictEqual({ bars: 1, kind: 'crossfade' })
+    live.pickCandidate('feedback')
+
+    expect(live.getSnapshot().live.next).toMatchObject({ clipId: 'feedback', transition: CUT })
   })
 
   it('does not offer a candidate whose code could not be fetched', async () => {

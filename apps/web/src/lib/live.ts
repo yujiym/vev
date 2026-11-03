@@ -509,6 +509,22 @@ const defaultFetchCandidates = async (body: CandidateRequest): Promise<Candidate
 const toPlayable = (clip: Clip): PlayableClip => ({ code: clip.code, id: clip.id, title: clip.title })
 
 /**
+ * A fetched clip as the rest of this module reads it. A `Clip` keeps its feedback flag at
+ * `deps.usesFeedback`, while everything downstream (the transition rules, the candidate cards)
+ * looks for `usesFeedback` at the top level, so a raw `Clip` read as a `ClipMeta` is silently
+ * "not feedback". This is the one place the two shapes meet.
+ */
+const toMeta = (clip: Clip): ClipMeta => ({
+  annotationStatus: clip.annotationStatus,
+  energy: clip.energy,
+  engine: clip.engine,
+  reviewed: clip.reviewed,
+  thumbnailKey: clip.thumbnailKey,
+  title: clip.title,
+  usesFeedback: clip.deps.usesFeedback,
+})
+
+/**
  * Wires the candidate pipeline to the control window.
  *
  * One request goes out when the screen opens and after every landing (spec §8.3: "right after A
@@ -540,10 +556,11 @@ export const createLive = (options: CreateLiveOptions): Live => {
   let libraryRequest: Promise<void> | undefined
 
   const summaries = new Map<string, ClipMeta>()
-  const clips = new Map<string, Clip>()
+  /** Candidates whose code has been fetched: the only ones that can be staged. */
+  const fetched = new Map<string, ClipMeta>()
   const listeners = new Set<(view: LiveView) => void>()
 
-  const lookup = (clipId: string): ClipMeta | undefined => clips.get(clipId) ?? summaries.get(clipId)
+  const lookup = (clipId: string): ClipMeta | undefined => fetched.get(clipId) ?? summaries.get(clipId)
 
   const ensureLibrary = async (): Promise<void> => {
     if (libraryRequest !== undefined) {
@@ -576,13 +593,13 @@ export const createLive = (options: CreateLiveOptions): Live => {
   }
 
   const ensureClips = async (ids: readonly string[]): Promise<void> => {
-    const missing = [...new Set(ids)].filter((id) => !clips.has(id))
-    const fetched = await Promise.all(missing.map(fetchOrNull))
+    const missing = [...new Set(ids)].filter((id) => !fetched.has(id))
+    const clips = await Promise.all(missing.map(fetchOrNull))
 
     const playable: PlayableClip[] = []
-    for (const clip of fetched) {
+    for (const clip of clips) {
       if (clip !== null) {
-        clips.set(clip.id, clip)
+        fetched.set(clip.id, toMeta(clip))
         playable.push(toPlayable(clip))
       }
     }
@@ -750,9 +767,9 @@ export const createLive = (options: CreateLiveOptions): Live => {
       // the performer can click that silently does nothing is worse than two honest ones.
       const playable = {
         ...response,
-        candidates: response.candidates.filter((candidate) => clips.has(candidate.clipId)),
+        candidates: response.candidates.filter((candidate) => fetched.has(candidate.clipId)),
       }
-      live = applyCandidates(live, requestId, playable, new Map([...summaries, ...clips]))
+      live = applyCandidates(live, requestId, playable, new Map([...summaries, ...fetched]))
       syncNext({ performer: false })
     } catch (error) {
       live = failRequest(live, requestId, error instanceof Error ? error.message : 'unknown error')
