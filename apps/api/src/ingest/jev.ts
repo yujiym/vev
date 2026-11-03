@@ -38,6 +38,15 @@ import * as v from 'valibot'
  *     choice -> { type: 'choice', choice: 'selected_key', confidence: 0.8, probabilities: {...} }
  *     noul   -> { type: 'noul',   noul: 0.95 }
  *
+ * Image input, observed the same day through `cf ai run`: `state: { brief, stills: ['still-0', ...] }`
+ * with `assets: { 'still-0': { type: 'image', format: 'jpeg', data_base64 } }` was accepted with
+ * three 512x288 JPEGs and the full 22-question set, and answered in the same shape. The images
+ * cost about 450 input tokens each (3,253 tokens with three against 1,908 without). A 320x180 JPEG
+ * was refused, `[7003] Model execution failed (User Input Error): Invalid image dimensions`, which
+ * is why the browser resizes before upload. TypeSafe's limits: PNG or JPEG only, 280-1568 pixels a
+ * side, 78,400-2,458,624 pixels, 16 MiB an image, 32 MiB a request. Images are labelled beta, so a
+ * caller must be able to fall back to a text-only call (see `annotate.ts`).
+ *
  * Three consequences the documentation states and this module enforces: a `score`'s criteria is an
  * ARRAY whose levels are ZERO-BASED, and the answer is a FLOAT within `0 .. criteria.length - 1`
  * (converting that to a domain value is the CALLER's job — see `annotate.ts`'s `energy`); a

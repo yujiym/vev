@@ -2,7 +2,7 @@
 
 # Browser drivers (manual)
 
-Three scripts that open the M2 screens in a real Chromium and assert on what is rendered. They exist because `.svelte` sits outside the type and lint gate (ADR 0001) and `vp build` proves only that a template parses and its imports resolve — it says nothing about whether a handler is wired to the right thing, or whether an `$effect` fires. Running these found two defects no unit test had.
+Four scripts that open the M2 screens in a real Chromium and assert on what is rendered. They exist because `.svelte` sits outside the type and lint gate (ADR 0001) and `vp build` proves only that a template parses and its imports resolve — it says nothing about whether a handler is wired to the right thing, or whether an `$effect` fires. Running these found two defects no unit test had.
 
 **They are not part of `pnpm test` and not wired into CI, deliberately.** They need a running server and a browser download; making the gate depend on either would trade a fast check for a flaky one.
 
@@ -20,6 +20,7 @@ Then, from the repository root:
 npx --yes --package playwright@1.63.0 node apps/web/e2e/library.mjs
 npx --yes --package playwright@1.63.0 node apps/web/e2e/editor.mjs
 npx --yes --package playwright@1.63.0 node apps/web/e2e/playback.mjs
+npx --yes --package playwright@1.63.0 node apps/web/e2e/stills.mjs
 ```
 
 `playwright@1.63.0` is pinned in that invocation on purpose; keep it, `lib.mjs`'s loader comment, and this line in step. **`playwright` is not a dependency of this repository and must not become one.**
@@ -52,6 +53,7 @@ Then confirm the port is actually free (`curl -s -o /dev/null -w '%{http_code}' 
 - **`library.mjs`** — `/studio/clips`. That changing a filter really refetches (the `?engine=` request is captured off the network, not inferred) and really narrows the grid; that a browser-side filter never invents a query parameter the route would ignore; that a refused filter shows the route's own 400 message and **no** clips rather than silently falling back to the whole library; and that a clip whose annotation FAILED is marked differently from one still PENDING — one needs a human, the other needs only time.
 - **`editor.mjs`** — `/studio/tracks` and `/studio/tracks/[id]`. That the editor reads `page.params.id` and loads that track's items (not empty, not another track's); that the end-of-list no-ops are visible as disabled buttons; that a reorder made in the UI survives a full page reload and matches what the API reads back from D1; and that the §14.2 commercial refusal reaches the screen naming the offending clip, with nothing stored.
 - **`playback.mjs`** — `/studio` with a real `/output` window open beside it. That loading a track stages its first item and names it; and — the property that has diverged from the reducer twice in this project — that while a fade runs, Go, transition changes, queueing and loading a track are refused **and the refusal is visible**, with Go now deliberately still enabled. Then that auto-advance brings the next item in on its `bars` with nobody pressing anything (§7). It also captures the crossfade itself.
+- **`stills.mjs`** — `/studio/clips/new` end to end: probe, record, save. That the recording yields three JPEG frames, that each leaves the browser inside TypeSafe's image limits (the 320x180 canvas is below the 280-pixel side minimum, so a frame that was not resized would be refused), and that the clip saves and the upload is accepted. It registers one clip titled `e2e stills` per run, and it writes the frames it captured to `e2e/screenshots/still-N.jpg` so a person can look at them: that they are upright and not black is not something the script can judge.
 
 `seed.mjs` creates everything they need and is idempotent; each script calls it. Every fixture is named with an `e2e ` prefix, and the assertions are scoped to those names rather than to totals, so a library with other clips in it does not break them. Run it alone to just set the fixtures up:
 
