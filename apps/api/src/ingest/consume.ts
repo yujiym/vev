@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-import { eq } from 'drizzle-orm'
+import { and, eq } from 'drizzle-orm'
 import { drizzle } from 'drizzle-orm/d1'
 import * as v from 'valibot'
 
@@ -56,12 +56,18 @@ export const enqueueAnnotation = async (
   )
 }
 
-/** Marks a clip's annotation as failed WITHOUT touching any other column — see this file's header. */
+/**
+ * Marks a clip's annotation as failed WITHOUT touching any other column — see this file's header.
+ *
+ * Only a clip still `pending` can fail. Two jobs may run for one clip, and the row they share is
+ * the only thing that tells a job whether it is still the newest: a failure that arrives after the
+ * other job annotated the clip is the older job's, and recording it would erase a good result.
+ */
 const markFailed = async (env: Env, clipId: string): Promise<void> => {
   await drizzle(env.DB)
     .update(clipsTable)
     .set({ annotationStatus: 'failed' })
-    .where(eq(clipsTable.id, clipId))
+    .where(and(eq(clipsTable.id, clipId), eq(clipsTable.annotationStatus, 'pending')))
 }
 
 /** Reading a few small objects from R2 is quick; this bounds the case where it is not. */
@@ -149,7 +155,15 @@ const annotateOne = async (env: Env, clipId: string, trigger: IngestMessage['tri
     motion: annotation.motion,
     tags: annotation.tags,
   })
-  await db
+  // The registration job is code-only and runs a minute after the clip appeared. If a stills job
+  // annotated the clip while this one waited on the model, this answer is the worse evidence and
+  // arrives later, so it may only fill a row that is still unannotated. A stills job always writes:
+  // its evidence is the better one (ADR 0010), and a newer upload's job replaces an older one's.
+  const claim =
+    trigger === 'registered'
+      ? and(eq(clipsTable.id, clipId), eq(clipsTable.annotationStatus, 'pending'))
+      : eq(clipsTable.id, clipId)
+  const written = await db
     .update(clipsTable)
     .set({
       annotationStatus: 'ok',
@@ -160,7 +174,13 @@ const annotateOne = async (env: Env, clipId: string, trigger: IngestMessage['tri
       motion: annotation.motion,
       tags: annotation.tags,
     })
-    .where(eq(clipsTable.id, clipId))
+    .where(claim)
+    .returning({ id: clipsTable.id })
+  if (written.length === 0) {
+    console.log(
+      `ingest: clip ${clipId} was annotated by another job while this one ran; dropping this result`,
+    )
+  }
 }
 
 type ConsumerMessage = Pick<Message, 'ack' | 'body' | 'retry'>

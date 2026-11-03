@@ -710,6 +710,28 @@ const runQueue = async (body: unknown, ai?: AiRunner): Promise<QueueOutcome> => 
   return v.parse(queueOutcomeSchema, await getQueueResult(batch, ctx))
 }
 
+/**
+ * A fake `AI` whose first call finds the row already finished by another job, which is what a
+ * stills job completing while the delayed registration job is still waiting on the model looks
+ * like from the row. The values it leaves are distinct from anything `createFakeAi` returns.
+ */
+const finishedElsewhere = (id: string, inner: AiRunner): AiRunner => {
+  let first = true
+  return {
+    run: async (model, inputs) => {
+      if (first) {
+        first = false
+        await env.DB.prepare(
+          "update clips set annotation_status = 'ok', energy = 1, description = 'annotated from stills' where id = ?",
+        )
+          .bind(id)
+          .run()
+      }
+      return await inner.run(model, inputs)
+    },
+  }
+}
+
 describe('the ingest queue consumer', () => {
   it('writes the annotation and marks the clip ok', async () => {
     const id = crypto.randomUUID()
@@ -743,6 +765,57 @@ describe('the ingest queue consumer', () => {
     expect(result.explicitAcks).toContain('message-under-test')
     const { annotation_status: status } = await readClip(id)
     expect(status).toBe('ok')
+  })
+
+  it('does not let a stale registration job overwrite an annotation a stills job finished first', async () => {
+    const id = crypto.randomUUID()
+    await insertClip(id)
+
+    await runQueue({ clipId: id, trigger: 'registered' }, finishedElsewhere(id, createFakeAi()))
+
+    const row = await readClip(id)
+    expect(row).toMatchObject({
+      annotation_status: 'ok',
+      description: 'annotated from stills',
+      energy: 1,
+    })
+  })
+
+  it('does not let a stale registration job mark a clip failed after a stills job annotated it', async () => {
+    const id = crypto.randomUUID()
+    await insertClip(id)
+
+    await runQueue(
+      { clipId: id, trigger: 'registered' },
+      finishedElsewhere(id, createFakeAi({ jevThrows: true })),
+    )
+
+    const row = await readClip(id)
+    expect(row).toMatchObject({ annotation_status: 'ok', energy: 1 })
+  })
+
+  it('keeps an annotation that exists when a later stills job fails', async () => {
+    const id = crypto.randomUUID()
+    await insertClip(id)
+    await runQueue({ clipId: id, trigger: 'registered' }, createFakeAi())
+
+    await runQueue({ clipId: id, trigger: 'stills' }, createFakeAi({ jevThrows: true }))
+
+    const row = await readClip(id)
+    expect(row).toMatchObject({ annotation_status: 'ok', energy: EXPECTED_ENERGY })
+  })
+
+  it('lets a stills job recover a clip whose registration annotation failed', async () => {
+    const id = crypto.randomUUID()
+    await insertClip(id)
+    await runQueue({ clipId: id, trigger: 'registered' }, createFakeAi({ jevThrows: true }))
+    const failed = await readClip(id)
+    expect(failed.annotation_status).toBe('failed')
+
+    await runQueue({ clipId: id, trigger: 'stills' }, createFakeAi())
+
+    const recovered = await readClip(id)
+    expect(recovered.annotation_status).toBe('ok')
   })
 
   it('annotates a clip whose stills never came when the registration message arrives', async () => {
