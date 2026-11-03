@@ -345,9 +345,6 @@
       {#if hints?.transition}
         <p class="hint" role="status">{hints.transition}</p>
       {/if}
-      {#if hints?.queue}
-        <p class="hint" role="status">{hints.queue}</p>
-      {/if}
       {#if view?.live.error}
         <p class="hint error" role="status">Candidates stale — {view.live.error}</p>
       {/if}
@@ -411,6 +408,9 @@
         changes.
       </p>
     {:else}
+      {#if hints?.queue}
+        <p class="hint" role="status">{hints.queue}</p>
+      {/if}
       {#each candidates as candidate, index (candidate.clipId)}
         <button
           class="candidate"
@@ -791,6 +791,10 @@
     display: grid;
     gap: 0.75rem;
     grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .candidates .hint {
+    grid-column: 1 / -1;
   }
 
   .candidate {
