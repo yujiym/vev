@@ -18,12 +18,12 @@ The browser takes three JPEG stills during the thumbnail recording, resized to 5
 - **Storage.** `POST /api/clips/:id/stills` takes up to three JPEGs as multipart parts, stores them in R2 under `stills/<clip id>/<n>.jpg` and records the keys in a nullable JSON column, `clips.still_keys`, in one update. It checks each part's magic bytes and size. The public media route does not serve stills.
 - **Questions.** `density`, `layerHint`, `energy` and the visual tags are asked with the frames and the code. `motion` is asked in the same call but its instructions say to judge from the code, and the brief says the same of anything that depends on movement. `feedback` and `audio-reactive` stay derived from `deps`. One call keeps the cost of the frames to their tokens.
 - **Fallback.** A clip with stills makes its first attempt with them and its second, if the first fails or returns something unusable, with the code alone. A clip without stills makes two code-only attempts as before. Either way it is at most two jev calls, each under the existing 30 second timeout, and `annotateClip` records which evidence produced the answer (`stills` or `code`) and how long the call took. Only when both attempts fail is the clip marked `failed`.
-- **Retriggering.** The stills route enqueues annotation again once the keys are stored, because registration has already enqueued it before any still existed. §17 records this as a default and not a settled decision.
+- **One annotation per clip.** The browser can upload stills only once the clip has an id, so registration enqueues a delayed message and the stills route enqueues an immediate one. The registration message stands down if the clip is no longer `pending`. §17 records the delay as a guess.
 
 ## Consequences
 
 - Registration never depends on stills. A browser that cannot capture them, an upload that fails, a missing R2 object and a refused image call all end in a clip annotated from its code, as before.
-- A clip with stills is annotated twice. The second run is the one that sees the frames, and it overwrites the first.
+- A clip with stills is annotated once. The registration message waits 60 seconds and stands down if the stills message has already run, so a clip with no stills is annotated about a minute late.
 - The canvas is enlarged to reach 512x288, so the stills carry no more detail than the 320x180 canvas drew. They satisfy jev's limits; they do not add resolution.
 - `askJev` takes an optional list of images and sends a plain string `state` when there are none, so a caller that passes none is unchanged. The wire spelling of images stays in `jev.ts`.
 - Whether stills make annotation more accurate is unmeasured (§17). The tag vocabulary still includes four tags about change over time, and nothing yet shows that jev judges them from the code when frames are attached.
