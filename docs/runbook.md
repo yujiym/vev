@@ -19,7 +19,7 @@ How to run vev locally and what bites. The design lives in [spec.md](./spec.md);
 | `pnpm live` | Local mode (§15.3): builds the app (pages and Worker in one `vp build`), applies local D1 migrations, and serves the built Worker in workerd on `127.0.0.1:8787`, the same shape that deploys. |
 | `pnpm check` | Typecheck, lint (oxlint) and format (oxfmt). |
 | `pnpm test` | Every package's tests. `apps/app` runs two Vitest projects: `worker` (the Hono app and routes, inside workerd) and `client` (browser logic under `client/`, in Node). |
-| `pnpm licenses:check` | Fails on a production dependency whose licence is not AGPL-3.0 compatible (§14.1). |
+| `pnpm licenses:check` | Fails on a production dependency, or a dev dependency bundled for browsers, whose licence is not AGPL-3.0 compatible (§14.1). |
 | `bash scripts/smoke-live.sh` | Starts `pnpm live` and asserts the single-origin contract: `/api/health` JSON, a page's shell, an unmatched path reaching the app's catch-all and loading the client script its shell names, `404` for a missing file and for an unknown API route, and the page's shared commit matching `/api/health`. CI runs this. |
 | `VEV_TARGET=preview pnpm --filter app run deploy` | `void deploy` for the preview target. Not yet run: linking the existing Worker comes first (ADR 0009). |
 
