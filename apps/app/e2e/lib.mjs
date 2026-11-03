@@ -69,7 +69,7 @@ const loadChromium = async () => {
     }
     if (bin === '') {
       throw new Error(
-        'playwright is not on the module path. Run these drivers as: npx --yes --package playwright@1.63.0 node apps/web/e2e/<script>.mjs (see ./README.md)',
+        'playwright is not on the module path. Run these drivers as: npx --yes --package playwright@1.63.0 node apps/app/e2e/<script>.mjs (see ./README.md)',
       )
     }
     const nodeModules = path.dirname(path.dirname(bin))
@@ -111,7 +111,7 @@ export const openBrowser = async () => {
  * Its options are its THIRD argument — the second is the value handed to the predicate — so
  * `waitForFunction(fn, { timeout })` silently passes the options object as data and falls back to
  * the 30-second default. That mistake was documented in one driver here and then made in another,
- * and nothing catches it: `apps/web/e2e/**` is excluded from lint. Named options make it
+ * and nothing catches it: `apps/app/e2e/**` is excluded from lint. Named options make it
  * unavailable rather than merely warned about.
  *
  * And it returns a boolean, so a caller can feed the real condition to `check` instead of letting

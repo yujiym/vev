@@ -47,7 +47,7 @@ export interface PlayableClip {
  * One item of a track, resolved: which clip, how many bars it holds the screen for before
  * auto-advance fires (spec §7), and the transition that brings it in. Both fallbacks in spec §5
  * (`bars` defaults to the clip's `defaultBars`, `transitionIn` to the track's `defaultTransition`)
- * are already applied by the time a step gets here — see `resolveTrack` in `$lib/track-editor.ts`.
+ * are already applied by the time a step gets here — see `resolveTrack` in `client/track-editor.ts`.
  */
 export interface TrackStep {
   readonly bars: number

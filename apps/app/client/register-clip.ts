@@ -57,7 +57,7 @@ export const prefillFromCode = (code: string): ClipPrefill => {
   const info = extractLicense(code)
   // `sourceUrl` is set to `undefined` (never omitted via a conditional spread) when the header
   // didn't state one — the same "always the key, `?? undefined` when absent" idiom the API side
-  // uses for D1's nullable columns (see `apps/api/src/routes/clips.ts`'s `nullsToUndefined`);
+  // uses for D1's nullable columns (see `apps/app/src/routes/clips.ts`'s `nullsToUndefined`);
   // `JSON.stringify` drops an `undefined`-valued key on its own when this later goes over the wire.
   return { author: info.author ?? '', license: info.license ?? 'unknown', sourceUrl: info.sourceUrl }
 }
@@ -182,7 +182,7 @@ export interface CaptureThumbnailDeps {
  * by an ordinary `requestAnimationFrame` tick loop for the recording's duration, and disposed in a
  * `finally` so a `MediaRecorder` failure can't leave it running.
  *
- * The palette frame is sampled with `readCanvasPixelsSync` (`$lib/palette.ts`) from INSIDE the tick
+ * The palette frame is sampled with `readCanvasPixelsSync` (`client/palette.ts`) from INSIDE the tick
  * callback, synchronously, right after `compositor.tick()` — not from an independently-scheduled
  * `setTimeout`. A canvas with `preserveDrawingBuffer: false` (Hydra's default) only reliably holds
  * its just-drawn pixels for a read in the same synchronous turn as the draw; a read from a separate
@@ -289,7 +289,7 @@ const thumbnailUploadSchema = v.object({
 })
 
 /**
- * Uploads a recorded thumbnail (`recordThumbnail`, `$lib/palette.ts`) for an already-registered
+ * Uploads a recorded thumbnail (`recordThumbnail`, `client/palette.ts`) for an already-registered
  * clip: `POST /api/clips/:id/thumbnail` with the WebM blob as the request body.
  *
  * The palette travels with the recording rather than with the registration payload, because it is
@@ -325,7 +325,7 @@ export const submitThumbnail = async (
 /**
  * Uploads a clip's stills: `POST /api/clips/:id/stills` with one multipart `still` part per JPEG,
  * in recording order. Uploading is what makes annotation run again with the frames in hand (see
- * `apps/api/src/routes/stills.ts`).
+ * `apps/app/src/routes/stills.ts`).
  *
  * Best effort by contract: it resolves to a message saying what went wrong instead of throwing,
  * because the clip is already registered and stills only improve its annotation. `undefined` means

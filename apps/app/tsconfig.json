@@ -4,6 +4,8 @@
     "types": ["@cloudflare/workers-types", "@cloudflare/vitest-plugin/types"]
   },
   "include": [
+    "pages",
+    ".void",
     "src",
     "test",
     "middleware",
@@ -12,5 +14,6 @@
     "void.config.ts",
     "deploy-targets.ts",
     "vitest.config.ts"
-  ]
+  ],
+  "exclude": ["client"]
 }

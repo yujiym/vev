@@ -29,7 +29,7 @@ export interface LibraryFilters {
  *
  * The split between this and `filterClips` is not arbitrary: the route supports exactly these
  * three (an absent parameter means no filter, a present-but-unparseable one is a 400 — see
- * `apps/api/src/routes/clips.ts`), and inventing a fourth parameter the server would ignore is how
+ * `apps/app/src/routes/clips.ts`), and inventing a fourth parameter the server would ignore is how
  * `?energy=3` ends up quietly returning the whole library. Energy and licence are therefore
  * narrowed in the browser, over `ClipSummary`, which already carries `energy`, `license` and
  * `commercialOk`. When the route grows those filters, they move up here and `filterClips` shrinks.
@@ -97,7 +97,7 @@ export const fetchLibrary = async (
 /**
  * Reads one clip in full, `code` included. The library grid deliberately never carries code
  * (`clipSummarySchema`), so this is what the control panel calls once per distinct clip in a track
- * before it can play one — see `fetchTrackClips` in `$lib/track-editor.ts`.
+ * before it can play one — see `fetchTrackClips` in `client/track-editor.ts`.
  */
 export const fetchClip = async (id: string, fetchImpl: typeof fetch = fetch): Promise<Clip> => {
   const endpoint = `${CLIPS_ENDPOINT}/${id}`
@@ -179,7 +179,7 @@ export const clipFlags = (clip: ClipSummary): readonly ClipFlag[] => {
  * Where the browser fetches a clip's thumbnail, or `undefined` when it has none — a clip
  * registered before its recording was uploaded, or one whose upload failed.
  *
- * `/media/:key` is the public route (`apps/api/src/routes/media.ts`); the key itself is what the
+ * `/media/:key` is the public route (`apps/app/src/routes/media.ts`); the key itself is what the
  * row stores, deliberately not a URL, so no hostname is baked into the database.
  */
 export const thumbnailUrl = (clip: { readonly thumbnailKey?: string | undefined }): string | undefined =>

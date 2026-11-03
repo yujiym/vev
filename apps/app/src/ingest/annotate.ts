@@ -28,7 +28,7 @@ import { derivedTags, TAG_THRESHOLD, TAG_VOCABULARY } from './tags.ts'
  *   `@cf/qwen/qwen2.5-coder-32b-instruct`, since the input is code. It is BEST EFFORT: if it fails
  *   the clip keeps every other annotation and `description` stays empty.
  * - `palette` is not asked of a model at all. It is computed in the browser from the frames the
- *   clip actually rendered (`dominantColours`, `apps/web/src/lib/palette.ts`) — spec §11 records
+ *   clip actually rendered (`dominantColours`, `apps/app/client/palette.ts`) — spec §11 records
  *   that judging a clip from still frames gets it wrong — so this module never produces it and
  *   never writes it.
  */

@@ -24,18 +24,12 @@ export default defineConfig({
     // fragments meant to be pasted into an existing block (a describe body, an
     // interface), and linting/formatting each fenced block as a standalone file
     // would flag or rewrite that deliberate indentation.
-    // apps/web/e2e/** is excluded for one structural reason: those scripts import `playwright`,
+    // apps/app/e2e/** is excluded for one structural reason: those scripts import `playwright`,
     // which is deliberately NOT a dependency of this repository (they are a manual browser check,
     // run via `npx --package`, and the gate must never pull a browser download). Type-aware lint
     // therefore cannot resolve that import, and every rule downstream of it reports on an `any`.
-    // They are still formatted by oxfmt — only lint skips them. See apps/web/e2e/README.md.
-    ignorePatterns: [
-      '**/worker-configuration.d.ts',
-      '**/.svelte-kit/**',
-      '**/build/**',
-      '.superpowers/**',
-      'apps/web/e2e/**',
-    ],
+    // They are still formatted by oxfmt — only lint skips them. See apps/app/e2e/README.md.
+    ignorePatterns: ['**/worker-configuration.d.ts', '**/build/**', '.superpowers/**', 'apps/app/e2e/**'],
     options: {
       typeAware: true,
       typeCheck: true,
@@ -92,7 +86,7 @@ export default defineConfig({
       },
       // Cloudflare Worker entry code runs in the workerd global scope:
       {
-        files: ['apps/api/src/**'],
+        files: ['apps/app/src/**'],
         env: { serviceworker: true },
       },
     ],
@@ -107,7 +101,7 @@ export default defineConfig({
     // `prettier-plugin-svelte` (and therefore `svelte/compiler`) eagerly whenever
     // this option is set anywhere in the active config, so it used to break
     // `vp check`/`vp fmt` for the whole repo before any package had installed
-    // `svelte`. Now that apps/web (Task 5) installs `svelte`, the top-level
+    // `svelte`. Now that apps/app installs `svelte`, the top-level
     // option resolves fine and is simpler than the file-scoped override it
     // replaces — confirmed by a deliberately mangled .svelte file: `vp check`
     // both flags it and leaves the rest of the repo unaffected.
@@ -122,11 +116,6 @@ export default defineConfig({
     // interface), and formatting each fenced block as a standalone file
     // dedents that deliberate indentation, turning a paste-in fragment into
     // what reads as top-level code.
-    ignorePatterns: [
-      ...(oxfmtPreset.ignorePatterns ?? []),
-      '**/.svelte-kit/**',
-      '**/build/**',
-      '.superpowers/**',
-    ],
+    ignorePatterns: [...(oxfmtPreset.ignorePatterns ?? []), '**/build/**', '.superpowers/**'],
   },
 })

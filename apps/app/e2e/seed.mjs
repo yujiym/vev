@@ -10,7 +10,7 @@ import path from 'node:path'
 
 export const BASE = 'http://127.0.0.1:8787'
 
-const API_DIR = path.join(import.meta.dirname, '..', '..', 'api')
+const APP_DIR = path.join(import.meta.dirname, '..')
 
 /** The five clips the library driver reads flags off, plus the two the playback driver crossfades between. */
 const CLIPS = [
@@ -61,7 +61,7 @@ const json = async (url, init) => {
 const setAnnotationState = (sql) => {
   try {
     execFileSync('pnpm', ['exec', 'void', 'db', 'execute', sql], {
-      cwd: API_DIR,
+      cwd: APP_DIR,
       stdio: ['ignore', 'ignore', 'pipe'],
     })
   } catch (error) {

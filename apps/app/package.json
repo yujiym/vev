@@ -1,5 +1,5 @@
 {
-  "name": "api",
+  "name": "app",
   "version": "0.0.0",
   "private": true,
   "license": "AGPL-3.0-or-later",
@@ -20,8 +20,11 @@
     "@vev/engines": "workspace:*",
     "@vev/ingest": "workspace:*",
     "@vev/shared": "workspace:*",
+    "@void/svelte": "1.5.0",
     "drizzle-orm": "^0.45.3",
     "hono": "^4.13.16",
+    "hydra-synth": "1.4.0",
+    "svelte": "^5.57.1",
     "valibot": "^1.5.0"
   },
   "devDependencies": {

@@ -17,7 +17,6 @@ const vars = (mode: 'cloud' | 'local') => ({
       ? '2751fc6207bcfd7f632e739f25ffd5a12a8325b4fcd8825fb9cbeac9bdf01ffd'
       : 'unused-in-local-mode',
   ACCESS_TEAM_DOMAIN: mode === 'cloud' ? '710gs.cloudflareaccess.com' : 'unused-in-local-mode',
-  GIT_COMMIT: process.env.GIT_COMMIT ?? 'dev',
   SOURCE_URL: 'https://github.com/yujiym/vev',
   VEV_MODE: mode,
 })

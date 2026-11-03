@@ -13,7 +13,7 @@ const MEDIA_CACHE_CONTROL = 'public, max-age=31536000, immutable'
 const thumbnailKeyFor = (clipId: string): string => `thumbnails/${clipId}.webm`
 
 /**
- * The palette, as `dominantColours` (`apps/web/src/lib/palette.ts`) produces it: lower-case
+ * The palette, as `dominantColours` (`apps/app/client/palette.ts`) produces it: lower-case
  * `#rrggbb`, at most a handful. Capped at eight so a malformed or hostile caller cannot write an
  * unbounded JSON array into the row; `dominantColours` returns five.
  */
@@ -25,7 +25,7 @@ const paletteSchema = v.pipe(
 
 /**
  * `POST /api/clips/:id/thumbnail` — accepts the registration screen's recorded WebM
- * (`recordThumbnail`, `apps/web/src/lib/palette.ts`), writes it to `MEDIA` under a key derived
+ * (`recordThumbnail`, `apps/app/client/palette.ts`), writes it to `MEDIA` under a key derived
  * from the clip id, and records that key on the clip's row. An owner route (mounted under `/api`,
  * behind `requireAccessAssertion`) — only the registrant who just ran the probe uploads a
  * thumbnail for their own clip.
