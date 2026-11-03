@@ -41,8 +41,16 @@ const landedOn = async (title, timeout = 20_000) =>
     arg: title,
     timeout,
   })
+// Not asking any more as well as three cards: a landing asks again, and the last answer's cards stay
+// up until the new one arrives, so a title read before that can name a card about to be replaced.
 const threeCards = async () =>
-  await until(page, () => document.querySelectorAll('.card').length === 3, { timeout: 20_000 })
+  await until(
+    page,
+    () =>
+      document.querySelectorAll('.card').length === 3 &&
+      !document.querySelector('.decision')?.textContent?.includes('asking'),
+    { timeout: 20_000 },
+  )
 
 // --- candidates render as soon as the first clip lands ---
 check('three candidates render on the stage', await threeCards(), `${(await candidateTitles()).length} cards`)
@@ -133,6 +141,7 @@ const earlyInBar = async () =>
 await until(page, () => !document.querySelector('.card.chosen'), { timeout: 20_000 })
 await page.mouse.click(640, 400)
 check('the bar has just begun', await earlyInBar())
+await threeCards()
 const keyed = await candidateTitles()
 const chosenTitle = async () =>
   flat((await page.locator('.card.chosen .candidate-title').textContent()) ?? '')
