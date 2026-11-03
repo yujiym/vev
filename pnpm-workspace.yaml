@@ -25,7 +25,7 @@ allowBuilds:
 #
 # @cloudflare/vitest-plugin@0.22.0 pins its own bundled miniflare/workerd
 # to 5.20260815.0-alpha / 1.20260815.1 — older than the compatibility date
-# apps/api's Worker ships with (cloudflare.config.ts's compatibilityDate). Without
+# apps/app's Worker ships with (deploy-targets.ts's compatibility_date). Without
 # these overrides the test harness's bundled runtime can't start a Worker on
 # that date ("newest date supported by this server binary is 2026-08-22"),
 # which would otherwise force the *shipped* compatibility date down to match a
@@ -46,6 +46,7 @@ minimumReleaseAgeExclude:
   - ultracite@7.12.1
   # Void 1.5.0 (2026-11-02) and the exact releases it requires; approved by the maintainer on 2026-11-03.
   - 'void@1.5.0'
+  - '@void/svelte@1.5.0'
   - '@void/deploy-cloudflare@1.5.0'
   - '@void/deploy-core@1.5.0'
   - '@void/edge@1.5.0'

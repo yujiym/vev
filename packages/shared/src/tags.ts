@@ -7,7 +7,7 @@
  * "kaleid" one day and "kaleidoscopic" the next, and a library filtered on free text is a library
  * that quietly stops finding things. Each tag here is instead a single `noul` question — a
  * statement with criteria for true and for false — whose answer is a probability, and a clip's
- * tags are the ones that come back above `TAG_THRESHOLD` (`apps/api/src/ingest/tags.ts`).
+ * tags are the ones that come back above `TAG_THRESHOLD` (`apps/app/src/ingest/tags.ts`).
  *
  * A tag therefore is NOT just a name: it is a statement jev can be asked about a clip's code, plus
  * a description of what makes that statement true and what makes it false. Writing those out is

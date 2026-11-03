@@ -22,15 +22,16 @@ An in-flight plan keeps its working files under `.superpowers/` — the plan, it
 
 Vite+ (`vp`) drives tests, lint (oxlint) and format (oxfmt) from the root `vite.config.ts`, which holds the whole lint and fmt policy; read its header before changing a rule. Package-level `vite.config.ts` files configure that package's dev server, build and test environment.
 
-- Entry points: `pnpm check` (typecheck + lint + fmt), `pnpm test`, `pnpm dev` (development, two processes), `pnpm live` (the built SPA served by the local Worker — how vev runs at a venue, §15.3).
+- Entry points: `pnpm check` (typecheck + lint + fmt), `pnpm test`, `pnpm dev` (development, one process on `127.0.0.1:8787` serving the pages and the API), `pnpm live` (the built app served by the local Worker — how vev runs at a venue, §15.3).
 - Install with `pnpm install --frozen-lockfile`; pnpm provisions Node itself.
 - Use `void` or `cf` for Cloudflare operations, never `wrangler` (ADR 0009).
 - Keep lint strict. Suppress a rule only at the narrowest applicable line, with the reason: `// oxlint-disable-next-line <rule> -- <why>`.
+- Browser code goes under `apps/app/client/` and Worker code under `apps/app/src/`, `middleware/` and `queues/`: they have different tsconfigs because they need different globals (DOM versus `@cloudflare/workers-types`). Pages under `apps/app/pages/` keep `ssr = false` in a `.server.ts` companion, so `hydra-synth` never reaches the Worker bundle.
 - `vite-plus`, `oxlint`, `oxfmt` and the `vite@*` override in `pnpm-workspace.yaml` move together; that file's comments say why.
 
 ## Repository status
 
-The MVP cut is built on localhost: M0 through M2 (§18), the rule half of M3 and M4, M6's automatic transitions mapped onto `cut` and `crossfade`, M7's dictionary steering, and §12.1's control screen. `apps/api` is a Void Worker around a Hono app and serves `apps/web`'s `adapter-static` build as static assets. `packages/shared`, `packages/engines`, `packages/ingest` and `packages/decision` exist.
+The MVP cut is built on localhost: M0 through M2 (§18), the rule half of M3 and M4, M6's automatic transitions mapped onto `cut` and `crossfade`, M7's dictionary steering, and §12.1's control screen. `apps/app` is the one application package, on Void Pages ([ADR 0011](docs/adr/0011-void-pages.md)): Svelte pages under `pages/` (each with `ssr = false`), browser logic under `client/`, and the Hono app, queue consumer and D1 migrations beside them. `packages/shared`, `packages/engines`, `packages/ingest` and `packages/decision` exist.
 
 Not built: embeddings and Vectorize, the settings screen and `systemone-http` providers (M5), textmode.js and ISF (M8, M9), public URLs (M10), audio input, session logging and offline preparation (M11), and self-hosting setup (M12). `services/decision-server` does not exist. §17 says what each leaves open.
 

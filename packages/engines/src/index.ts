@@ -9,7 +9,7 @@ export type { Clock } from './clock.ts'
 export { FIXTURES } from './fixtures.ts'
 // `rewriteOut` and its siblings live under `hydra/` but belong to this pure entry, not to
 // `@vev/engines/hydra`: they are string transforms over clip source with no renderer behind them,
-// and `@vev/ingest` and `apps/api` both need them in a Worker, where `hydra-synth` cannot go.
+// and `@vev/ingest` and `apps/app` both need them in a Worker, where `hydra-synth` cannot go.
 export { countOutCalls, MULTI_OUTPUT_MESSAGE, outCallTargets, rewriteOut } from './hydra/rewrite.ts'
 export {
   canBack,
