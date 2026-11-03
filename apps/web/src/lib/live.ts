@@ -155,10 +155,15 @@ export const failRequest = (state: LiveState, requestId: number, error: string):
   return { ...state, error, load: 'stale' }
 }
 
-/** Records the clip that just stopped being current. */
-export const pushHistory = (state: LiveState, clipId: string): LiveState => ({
+/**
+ * A clip stopped being current and a transition replaced it. Both records move in this one step so
+ * they cannot drift apart. The clip log is the play log spec §8.2 asks for, not the reducer's Back
+ * stack: a clip the performer backed out of was still shown, and stays in it.
+ */
+export const recordArrival = (state: LiveState, left: string, arrival: TransitionKind): LiveState => ({
   ...state,
-  historyIds: [...state.historyIds, clipId].slice(-20),
+  historyIds: [...state.historyIds, left].slice(-20),
+  recentTransitions: [...state.recentTransitions, arrival].slice(-RECENT_LIMIT),
 })
 
 /** The performer's pick wins over the track's own next item (spec §7). */
@@ -530,7 +535,6 @@ export const createLive = (options: CreateLiveOptions): Live => {
   let controlSnapshot = control.getSnapshot()
   let track: LiveTrack | undefined
   let lastCurrent: string | undefined
-  let stagedTransition: TransitionSpec | undefined
   let stopped = false
   let syncing = false
   let libraryRequest: Promise<void> | undefined
@@ -668,9 +672,6 @@ export const createLive = (options: CreateLiveOptions): Live => {
       if (!sameClip) {
         control.overrideNext(desired.clipId)
       }
-      // What the control window accepted, not what was asked: both are refused mid-fade, and the
-      // variety rule must read the transition that actually ran.
-      stagedTransition = control.getSnapshot().transition
     } finally {
       syncing = false
     }
@@ -769,13 +770,7 @@ export const createLive = (options: CreateLiveOptions): Live => {
       lastCurrent = snapshotNext.current.clipId
       void request()
     } else if (lastCurrent !== snapshotNext.current.clipId) {
-      live = pushHistory(live, lastCurrent)
-      if (stagedTransition !== undefined) {
-        live = {
-          ...live,
-          recentTransitions: [...live.recentTransitions, stagedTransition.kind].slice(-RECENT_LIMIT),
-        }
-      }
+      live = recordArrival(live, lastCurrent, (snapshotNext.arrivedBy ?? snapshotNext.transition).kind)
       live = { ...live, pickedClipId: undefined, transition: undefined }
       lastCurrent = snapshotNext.current.clipId
       void request()

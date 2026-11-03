@@ -16,7 +16,7 @@ import {
   keyAction,
   nextTransitionChoice,
   pickCandidate,
-  pushHistory,
+  recordArrival,
   selectNext,
 } from './live.ts'
 
@@ -551,6 +551,29 @@ describe('createLive with a track and an armed switch', () => {
     expect(live.getSnapshot().live.next).toMatchObject({ clipId: 'two', source: 'track' })
   })
 
+  it('records a cut for Back, and keeps the clip it left in the play log beside it', async () => {
+    const { advance, control, live } = setup(() => response(['x', 'y', 'z']))
+    await vi.waitFor(() => {
+      expect(live.getSnapshot().live.load).toBe('ok')
+    })
+    live.pickCandidate('x')
+    live.chooseTransition(FADE)
+    advance(500)
+    control.go()
+    advance(2000)
+    advance(6000)
+    expect(control.getSnapshot().current.clipId).toBe('x')
+    expect(live.getSnapshot().live).toMatchObject({ historyIds: ['a'], recentTransitions: ['crossfade'] })
+
+    control.back()
+
+    expect(control.getSnapshot().current.clipId).toBe('a')
+    expect(live.getSnapshot().live).toMatchObject({
+      historyIds: ['a', 'x'],
+      recentTransitions: ['crossfade', 'cut'],
+    })
+  })
+
   it('does not offer a candidate whose code could not be fetched', async () => {
     const control = createControl(() => {}, {
       clips: ids.map((id) => playable(id)),
@@ -573,9 +596,10 @@ describe('createLive with a track and an armed switch', () => {
   })
 })
 
-describe('history', () => {
-  it('keeps the most recent clip last', () => {
-    const state = pushHistory(pushHistory(initialLive(), 'a'), 'b')
+describe(recordArrival, () => {
+  it('records the clip that was left and the transition that replaced it together, most recent last', () => {
+    const state = recordArrival(recordArrival(initialLive(), 'a', 'crossfade'), 'b', 'cut')
     expect(state.historyIds).toStrictEqual(['a', 'b'])
+    expect(state.recentTransitions).toStrictEqual(['crossfade', 'cut'])
   })
 })

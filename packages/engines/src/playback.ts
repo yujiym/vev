@@ -24,6 +24,11 @@ export interface PlaybackState {
   fading?: { from: Slot; to: Slot; startedAt: number }
   /** Set by Hold: auto-advance is paused until the performer presses Go again (spec §7). */
   held?: boolean
+  /**
+   * The transition `current` actually arrived with: what the switch used when it landed, and a cut
+   * for Back, whatever transition is set for the next switch. Absent until the first switch.
+   */
+  arrivedBy?: TransitionSpec
   /** Clips that were current before `current`, most recent last. Back consumes the end. */
   history?: readonly Loaded[]
   /** Output-wide panic state. Absent means normal. */
@@ -95,6 +100,7 @@ const complete = (state: PlaybackState): PlaybackState => {
   }
 
   const next: PlaybackState = {
+    arrivedBy: state.transition,
     current: state.next,
     history: [...(state.history ?? []), state.current].slice(-HISTORY_LIMIT),
     transition: state.transition,
@@ -144,6 +150,7 @@ const back = (state: PlaybackState): PlaybackState => {
   // The control window re-loads the previous clip's code into that slot before asking the output to
   // cut to it, so a history deeper than the two buffers can still be walked.
   const returned: PlaybackState = {
+    arrivedBy: { bars: 0, kind: 'cut' },
     current: { clipId: previous.clipId, slot: other(state.current.slot) },
     history: history.slice(0, -1),
     transition: state.transition,

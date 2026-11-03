@@ -282,6 +282,30 @@ describe('transport: hold, back and panic', () => {
     expect(isHeld(state)).toBe(true)
   })
 
+  it('records the transition a switch landed with', () => {
+    let state = reduce(start(), { clipId: 'loud', kind: 'select-next' }, clock)
+    expect(state.arrivedBy).toBeUndefined()
+    state = reduce(state, { kind: 'set-transition', transition: fade }, clock)
+    state = reduce(state, { kind: 'go', now: 0 }, clock)
+    state = reduce(state, { kind: 'tick', now: 2000 }, clock)
+    state = reduce(state, { kind: 'tick', now: 6000 }, clock)
+    expect(state.current.clipId).toBe('loud')
+    expect(state.arrivedBy).toStrictEqual(fade)
+  })
+
+  it('records a cut for Back whatever transition is set', () => {
+    let state = reduce(start(), { clipId: 'loud', kind: 'select-next' }, clock)
+    state = reduce(state, { kind: 'set-transition', transition: fade }, clock)
+    state = reduce(state, { kind: 'go-now', now: 0 }, clock)
+    state = reduce(state, { kind: 'tick', now: 0 }, clock)
+    state = reduce(state, { kind: 'tick', now: 4000 }, clock)
+    expect(state.arrivedBy).toStrictEqual(fade)
+
+    state = reduce(state, { kind: 'back' }, clock)
+    expect(state.current.clipId).toBe('quiet')
+    expect(state.arrivedBy).toStrictEqual(cut)
+  })
+
   it('Back refuses with no previous clip, changing nothing', () => {
     const before = start()
     expect(canBack(before)).toBe(false)

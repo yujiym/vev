@@ -89,6 +89,8 @@ export interface TrackSnapshot {
 }
 
 export interface ControlSnapshot {
+  /** The transition the clip on screen actually arrived with (a cut for Back); `undefined` before the first switch. */
+  arrivedBy: TransitionSpec | undefined
   /** True once Go (or Go now) has armed a switch that has not yet fired. A panel that showed only `fading` would look identical before and after a press whose bar has not landed. */
   armed: boolean
   barPhase: number
@@ -299,6 +301,7 @@ export const createControl = (
 
     return {
       armed: state.firing !== undefined,
+      arrivedBy: state.arrivedBy,
       barPhase: barPhase(clock, at),
       beatsPerBar: clock.beatsPerBar,
       bpm: clock.bpm,
