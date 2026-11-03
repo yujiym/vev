@@ -443,7 +443,9 @@ export const createControl = (picture: Picture, options: CreateControlOptions = 
       return
     }
     if (before.firing && !state.firing) {
-      run.armedAt = state.fading?.startedAt ?? before.firing.at
+      // A Go now has no bar of its own: its `at` is the press, which Freeze or an unrendered slot can
+      // leave far behind the frame it lands on. The step's clock starts where the switch fired.
+      run.armedAt = state.fading?.startedAt ?? (before.firing.onBar ? before.firing.at : now())
     }
     if (state.current !== before.current) {
       if (run.pending === 'beyond') {

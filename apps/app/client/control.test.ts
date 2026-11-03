@@ -1299,6 +1299,30 @@ describe('transport controls', () => {
     expect(control.getSnapshot().current.clipId).toBe('two')
   })
 
+  it('a Go now held by Freeze starts the step’s clock when it lands, not when it was pressed', () => {
+    const clockNow = createFakeNow(0)
+    const { control } = trackControl(clockNow)
+    control.loadTrack(cutTrack(4))
+
+    control.freeze()
+    clockNow.set(500)
+    control.goNow()
+    clockNow.set(20_000)
+    control.freeze()
+    control.tick()
+
+    expect(control.getSnapshot()).toMatchObject({
+      armed: false,
+      current: { clipId: 'one' },
+      next: { clipId: 'two' },
+      track: { elapsedBars: 0, index: 0 },
+    })
+
+    clockNow.set(20_000 + 3 * 2000)
+    control.tick()
+    expect(control.getSnapshot().armed).toBe(true)
+  })
+
   it('a Hold pressed while a switch is armed survives the landing', () => {
     const clockNow = createFakeNow(0)
     const { control } = trackControl(clockNow)
