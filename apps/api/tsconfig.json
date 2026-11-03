@@ -3,5 +3,14 @@
   "compilerOptions": {
     "types": ["@cloudflare/workers-types", "@cloudflare/vitest-plugin/types"]
   },
-  "include": ["src", "test", "middleware", "queues", "vite.config.ts", "void.config.ts", "vitest.config.ts"]
+  "include": [
+    "src",
+    "test",
+    "middleware",
+    "queues",
+    "vite.config.ts",
+    "void.config.ts",
+    "deploy-targets.ts",
+    "vitest.config.ts"
+  ]
 }
