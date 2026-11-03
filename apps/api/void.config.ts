@@ -8,6 +8,8 @@ const target = v.parse(v.picklist(['local', 'preview', 'production']), process.e
 
 export default defineConfig({
   cloudflare: targets[target],
-  inference: { appType: 'void', bindings: { db: false } },
+  // Void infers an AI binding from any `env.AI` in the source, which makes `vp preview` open a remote
+  // session that needs a Cloudflare login and a network. `deploy-targets.ts` alone decides who gets one.
+  inference: { appType: 'void', bindings: { ai: false, db: false } },
   routing: { notFound: 'none' },
 })
