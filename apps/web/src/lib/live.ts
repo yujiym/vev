@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-import { chooseTransition, interpretDirection } from '@vev/decision'
+import { chooseTransition, interpretDirection, withVariety } from '@vev/decision'
 import { candidateResponseSchema, DEFAULT_TRANSITION } from '@vev/shared'
 import type {
   AnnotationStatus,
@@ -265,10 +265,19 @@ const leadingCandidateNext = (state: LiveState, input: NextInput): LiveNext | un
   }
 }
 
-/** The transition for a candidate: the response's suggestion for #1, the rules for any other. */
+/**
+ * The transition for a candidate: the response's suggestion for #1, the rules for any other. The
+ * suggestion is made by a Worker that never sees what was played, so the variety rule (spec §9.2:
+ * three in a row make the fourth different) is applied here, where the record lives.
+ */
 const automaticTransition = (state: LiveState, input: NextInput, selected: LiveNext): LiveNext => {
   if (selected.candidateIndex === 0 && state.suggestedTransition !== undefined) {
-    return { ...selected, transition: state.suggestedTransition, transitionFrom: 'suggested' }
+    const transition = withVariety(state.suggestedTransition, input.recentTransitions)
+    return {
+      ...selected,
+      transition,
+      transitionFrom: transition === state.suggestedTransition ? 'suggested' : 'rules',
+    }
   }
 
   const nextMeta = input.lookup(selected.clipId)

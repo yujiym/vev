@@ -2,7 +2,7 @@
 import type { ClipEnergy, EngineKind, TransitionKind, TransitionSpec } from '@vev/shared'
 import { describe, expect, it } from 'vitest'
 
-import { chooseTransition } from './transition.ts'
+import { chooseTransition, withVariety } from './transition.ts'
 
 const DEFAULT: TransitionSpec = { bars: 2, kind: 'crossfade' }
 
@@ -100,5 +100,31 @@ describe('automatic transition choice', () => {
   it('does not override a human’s choice to keep a sequence interesting', () => {
     const explicit: TransitionSpec = { bars: 1, kind: 'cut' }
     expect(choose({ explicit, recent: ['cut', 'cut', 'cut'] })).toStrictEqual(explicit)
+  })
+})
+
+describe(withVariety, () => {
+  it('swaps a transition that would be the fourth identical one in a row', () => {
+    expect(
+      withVariety({ bars: 2, kind: 'crossfade' }, ['crossfade', 'crossfade', 'crossfade']),
+    ).toStrictEqual({
+      bars: 0,
+      kind: 'cut',
+    })
+    expect(withVariety({ bars: 0, kind: 'cut' }, ['cut', 'cut', 'cut'])).toStrictEqual({
+      bars: 2,
+      kind: 'crossfade',
+    })
+  })
+
+  it('leaves a transition alone when the last three were not all its kind', () => {
+    const chosen: TransitionSpec = { bars: 2, kind: 'crossfade' }
+    expect(withVariety(chosen, ['cut', 'crossfade', 'crossfade'])).toBe(chosen)
+    expect(withVariety(chosen, ['crossfade', 'crossfade'])).toBe(chosen)
+  })
+
+  it('reads only the last three', () => {
+    const chosen: TransitionSpec = { bars: 2, kind: 'crossfade' }
+    expect(withVariety(chosen, ['cut', 'cut', 'cut', 'crossfade', 'cut', 'crossfade'])).toBe(chosen)
   })
 })

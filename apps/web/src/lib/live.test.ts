@@ -229,6 +229,19 @@ describe(selectNext, () => {
     expect(next?.transition.kind).toBe('crossfade')
   })
 
+  it('breaks a run of three identical transitions even when the response suggested the fourth', () => {
+    const state = loaded(['b', 'c', 'd'], FADE)
+
+    const repeated = selectNext(
+      state,
+      nextInput({ recentTransitions: ['crossfade', 'crossfade', 'crossfade'] }),
+    )
+    expect(repeated).toMatchObject({ candidateIndex: 0, transition: CUT, transitionFrom: 'rules' })
+
+    const varied = selectNext(state, nextInput({ recentTransitions: ['cut', 'crossfade', 'crossfade'] }))
+    expect(varied).toMatchObject({ transition: FADE, transitionFrom: 'suggested' })
+  })
+
   it('never offers the clip already on screen, even from a stale answer', () => {
     const stale = loaded(['current', 'b', 'c'])
     const next = selectNext(stale, nextInput())

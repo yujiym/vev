@@ -75,6 +75,18 @@ const byRules = (input: TransitionInput): TransitionSpec => {
 const alternative = (kind: TransitionKind): TransitionSpec => (kind === 'cut' ? crossfade(2) : CUT)
 
 /**
+ * Spec §9.2's last line: three identical transitions in a row make the fourth different. A caller
+ * that already holds a transition, such as one the decision response suggested, applies it here
+ * because only the caller knows what was played.
+ */
+export const withVariety = (chosen: TransitionSpec, recent: readonly TransitionKind[]): TransitionSpec => {
+  const lastThree = recent.slice(-3)
+  const repeated = lastThree.length === 3 && lastThree.every((kind) => kind === chosen.kind)
+
+  return repeated ? alternative(chosen.kind) : chosen
+}
+
+/**
  * Spec §9.2's automatic selection.
  *
  * Order: an explicit choice, then a locked transition, then the rules, and §9.2's last line — three
@@ -90,9 +102,5 @@ export const chooseTransition = (input: TransitionInput): TransitionSpec => {
     return input.locked
   }
 
-  const chosen = byRules(input)
-  const recent = (input.recent ?? []).slice(-3)
-  const repeated = recent.length === 3 && recent.every((kind) => kind === chosen.kind)
-
-  return repeated ? alternative(chosen.kind) : chosen
+  return withVariety(byRules(input), input.recent ?? [])
 }
