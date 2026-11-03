@@ -271,6 +271,17 @@ describe('transport: hold, back and panic', () => {
     expect(isHeld(state)).toBe(false)
   })
 
+  it('Hold survives a switch landing and a Back, because neither is the performer releasing it', () => {
+    let state = reduce(start(), { clipId: 'loud', kind: 'select-next' }, clock)
+    state = reduce(state, { kind: 'go', now: 0 }, clock)
+    state = reduce(state, { kind: 'hold' }, clock)
+    state = reduce(state, { kind: 'tick', now: 2000 }, clock)
+    expect(isHeld(state)).toBe(true)
+
+    state = reduce(state, { kind: 'back' }, clock)
+    expect(isHeld(state)).toBe(true)
+  })
+
   it('Back refuses with no previous clip, changing nothing', () => {
     const before = start()
     expect(canBack(before)).toBe(false)
