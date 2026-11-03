@@ -93,7 +93,7 @@ export interface LoadedTrack {
   readonly title: string
 }
 
-/** Where the panel is in the loaded track. Read-only: every field is derived from the reducer's state or from the track itself. */
+/** Where the show is in the loaded track. Read-only: every field is derived from the reducer's state or from the track itself. */
 export interface TrackSnapshot {
   /** Spec §7: "Auto-advance can be toggled. When off, A keeps playing until Go." */
   autoAdvance: boolean
@@ -141,7 +141,7 @@ export interface ControlSnapshot {
   /** The source of the clip on screen, for the code overlay. */
   code: string | undefined
   current: Loaded
-  /** The clip on screen, by name. `undefined` only for a start clip the panel was never given — an id is not a name, and a UUID on stage tells the performer nothing. */
+  /** The clip on screen, by name. `undefined` only for a start clip the control was never given — an id is not a name, and a UUID on stage tells the performer nothing. */
   currentTitle: string | undefined
   /** True while a crossfade is running. `go`, `stage` and `setTransition` are all refused during it; `goNow` finishes the fade, and `choose` waits for its landing. */
   fading: boolean
@@ -158,15 +158,15 @@ export interface ControlSnapshot {
   panic: PanicMode
   /** The last thing the picture refused: a clip that would not compile, or a frame that threw. The show keeps playing what it has. */
   pictureFault: string | undefined
-  /** The loaded track, or `undefined` when the panel is not playing one. */
+  /** The loaded track, or `undefined` when none is playing. */
   track: TrackSnapshot | undefined
   /** What Go/Go now will arm next, including how many bars it lasts. */
   transition: TransitionSpec
 }
 
 /**
- * Why each control is unavailable, or `undefined` when it is available — one string per section of
- * the panel.
+ * Why each control is unavailable, or `undefined` when it is available — one string per control that
+ * can refuse.
  *
  * This lives here, beside the snapshot it reads, rather than in the `.svelte` file, for the reason
  * ADR 0001 gives: a template is outside the type and lint gate, and "which refusal is showing" is
@@ -205,7 +205,7 @@ export const controlHints = (snapshot: ControlSnapshot): ControlHints => {
     go = `${FADE_RUNNING} — Go is unavailable until it completes; Go now finishes it early.`
   } else if (snapshot.armed) {
     // Not a fault, but still a reason the button is dead: the reducer refuses a second Go over an
-    // armed one, and without this the panel would look broken between the press and the bar.
+    // armed one, and without this the button would look broken between the press and the bar.
     go = 'Armed — the switch fires on the next bar.'
   } else if (!snapshot.canGo) {
     go = 'Nothing is staged — load a track or wait for a candidate.'

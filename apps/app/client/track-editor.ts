@@ -29,7 +29,7 @@ const TRACKS_ENDPOINT = '/api/tracks'
  *
  * An out-of-range `from` is the same no-op rather than a throw: the editor's buttons can only
  * produce valid indices, so an invalid one means a stale render, and a stale render must not take
- * the panel down mid-set (§0).
+ * the stage down mid-set (§0).
  */
 export const moveItem = <T>(items: readonly T[], from: number, direction: MoveDirection): readonly T[] => {
   const to = direction === 'up' ? from - 1 : from + 1
@@ -225,7 +225,7 @@ export const resolveTrack = (track: Track, clips: ReadonlyMap<string, Clip>): Re
 
 /**
  * Fetches every clip a track references, once each, in parallel. `GET /api/tracks/:id` carries ids
- * — never code — so the panel has to gather the code itself; `clipSummarySchema` does not carry it
+ * — never code — so the browser has to gather the code itself; `clipSummarySchema` does not carry it
  * either, by design (a library grid must not ship every clip's source).
  */
 export const fetchTrackClips = async (

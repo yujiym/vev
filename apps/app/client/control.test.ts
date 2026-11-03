@@ -375,6 +375,21 @@ describe('the picture obeys the reducer', () => {
     expect(switches(messages)).toStrictEqual([{ at: 4000, kind: 'switch', to: 'b', transition: CUT_SPEC }])
   })
 
+  it('one rendered frame is not enough: Hydra samples a buffer from before its last draw', () => {
+    const clockNow = createFakeNow(0)
+    const { control, messages } = bare({ now: clockNow.now })
+
+    clockNow.set(1900)
+    control.choose('loud')
+    clockNow.set(1916)
+    control.tick()
+    clockNow.set(2000)
+    control.tick()
+
+    expect(switches(messages)).toStrictEqual([])
+    expect(control.getSnapshot().firingAt).toBe(4000)
+  })
+
   it('choosing again before the bar replaces the clip and keeps the bar', () => {
     const clockNow = createFakeNow(0)
     const { control, messages } = bare({ now: clockNow.now })

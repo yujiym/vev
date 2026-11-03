@@ -11,7 +11,7 @@ export default defineMiddleware(async (c, next) => {
   if (SERVER_PATH.test(url.pathname)) {
     return await server.fetch(c.req.raw, c.env, c.executionCtx)
   }
-  // Pages match without the slash, and the catch-all would otherwise turn `/studio/` into "Not found".
+  // Pages match without the slash, and the catch-all would otherwise turn `/some-page/` into "Not found".
   if (TRAILING_SLASH.test(url.pathname)) {
     url.pathname = url.pathname.replace(TRAILING_SLASH, '')
     return c.redirect(url.toString(), 308)

@@ -79,7 +79,7 @@ const other = (slot: Slot): Slot => (slot === 'a' ? 'b' : 'a')
  * a second implementation of a rule this module owns, and the two drift. In M1 they drifted three
  * times, and the ruling that came out of it named only the fade — so a panel guarding on `fading`
  * alone still offered Go with nothing queued, and still offered it after Go was already armed.
- * The fix is not another guard in the panel; it is that there is only one predicate, exported, and
+ * The fix is not another guard in the screen; it is that there is only one predicate, exported, and
  * `reduce`'s own guards are written in terms of it. A control the reducer refuses is exactly a
  * control the UI must disable, by construction rather than by agreement.
  */
@@ -200,8 +200,8 @@ const back = (state: PlaybackState): PlaybackState => {
     return state
   }
 
-  // The control window re-loads the previous clip's code into that slot before asking the output to
-  // cut to it, so a history deeper than the two buffers can still be walked.
+  // The control re-loads the previous clip's code into that slot before asking the picture to cut
+  // to it, so a history deeper than the two buffers can still be walked.
   const returned: PlaybackState = {
     arrivedBy: { bars: 0, kind: 'cut' },
     current: { clipId: previous.clipId, slot: other(state.current.slot) },

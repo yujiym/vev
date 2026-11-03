@@ -17,12 +17,10 @@ import type { StillSize } from './stills.ts'
 /**
  * The registration screen's own transient `HydraCompositor` (spec §11.1) is created for the
  * probe, used for the thumbnail recording, and disposed immediately — never left mounted after
- * save. Spec §3 says rendering happens only in the output window; that rule is about *the show*
- * rendering in one place, not about every WebGL context vev ever opens. §11.1 requires the probe
- * and the thumbnail recording to run in a browser, and the registration screen is the only browser
- * that request has — so it mounts its own, disposable, context. §6.5's cap on live WebGL contexts
- * is exactly why "disposed immediately" matters here, not "never created". Task 7 amends §3's text
- * to say this; this module is what makes the amendment true rather than aspirational.
+ * save. §11.1 requires the probe and the thumbnail recording to run in a browser, and the stage is
+ * the only browser there is, so they run beside the live picture on its GPU (ADR 0012).
+ * `registrationGate` keeps them away from a switch in flight, and §6.5's cap on live WebGL contexts
+ * is why "disposed immediately" matters here, not "never created".
  */
 
 /** What a registrant fills in on the registration form — the browser-side counterpart of `@vev/shared`'s `newClipSchema`. */
