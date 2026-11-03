@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import { chooseTransition, interpretDirection } from '@vev/decision'
-import { candidateResponseSchema } from '@vev/shared'
+import { candidateResponseSchema, DEFAULT_TRANSITION } from '@vev/shared'
 import type {
   AnnotationStatus,
   CandidateRequest,
@@ -17,7 +17,7 @@ import type {
 import * as v from 'valibot'
 
 import type { Control, ControlSnapshot, PlayableClip, TrackStep } from './control.ts'
-import { fetchClip, fetchLibrary, thumbnailUrl } from './library.ts'
+import { failure, fetchClip, fetchLibrary, thumbnailUrl } from './library.ts'
 
 /**
  * The live screen's data. Everything the performer is offered, what it was offered for, and what
@@ -26,8 +26,6 @@ import { fetchClip, fetchLibrary, thumbnailUrl } from './library.ts'
  * belongs to a superseded question, keep the last answer when a new one fails — that is exactly
  * the kind of rule a template must not own.
  */
-
-const DEFAULT_TRANSITION: TransitionSpec = { bars: 2, kind: 'crossfade' }
 
 /** How many recent transitions the variety rule reads (spec §9.2: three in a row). */
 const RECENT_LIMIT = 6
@@ -79,7 +77,6 @@ export interface LiveState {
   suggestedTransition?: TransitionSpec
   /** The performer's explicit transition choice for this switch. */
   transition?: TransitionSpec
-  transitionPicked: boolean
   recentTransitions: readonly TransitionKind[]
 }
 
@@ -89,7 +86,6 @@ export const initialLive = (): LiveState => ({
   load: 'idle',
   recentTransitions: [],
   requestId: 0,
-  transitionPicked: false,
 })
 
 /** A new question is about to be asked. The id moves immediately, so any older answer is stale. */
@@ -143,7 +139,7 @@ export const applyCandidates = (
   }
 
   // The pick belongs to the old answer; a transition chosen for it goes with it.
-  return { ...answered, pickedClipId: undefined, transition: undefined, transitionPicked: false }
+  return { ...answered, pickedClipId: undefined, transition: undefined }
 }
 
 /**
@@ -170,14 +166,12 @@ export const pickCandidate = (state: LiveState, clipId: string): LiveState => ({
   ...state,
   pickedClipId: clipId,
   transition: undefined,
-  transitionPicked: false,
 })
 
 /** The performer's one-click transition choice, which outranks every automatic rule (spec §9.2). */
 export const chooseTransitionManually = (state: LiveState, transition: TransitionSpec): LiveState => ({
   ...state,
   transition,
-  transitionPicked: true,
 })
 
 export interface LiveNext {
@@ -295,7 +289,7 @@ export const selectNext = (state: LiveState, input: NextInput): LiveNext | undef
     return undefined
   }
 
-  if (state.transitionPicked && state.transition !== undefined) {
+  if (state.transition !== undefined) {
     return { ...selected, transition: state.transition, transitionFrom: 'performer' }
   }
 
@@ -457,7 +451,6 @@ export interface LiveSnapshot {
   recentTransitions: readonly TransitionKind[]
   suggestedTransition: TransitionSpec | undefined
   track: LiveTrack | undefined
-  transitionPicked: boolean
 }
 
 /** One subscription gives the page everything it renders: transport state and the candidate state. */
@@ -502,8 +495,7 @@ const defaultFetchCandidates = async (body: CandidateRequest): Promise<Candidate
     method: 'POST',
   })
   if (!response.ok) {
-    const detail = await response.text().catch(() => '')
-    throw new Error(detail === '' ? `POST /api/candidates failed with ${response.status}` : detail)
+    throw await failure(response, 'POST /api/candidates')
   }
 
   return v.parse(candidateResponseSchema, await response.json())
@@ -541,7 +533,6 @@ export const createLive = (options: CreateLiveOptions): Live => {
   let stagedTransition: TransitionSpec | undefined
   let stopped = false
   let syncing = false
-  let requestedOnce = false
   let libraryRequest: Promise<void> | undefined
 
   const summaries = new Map<string, ClipMeta>()
@@ -700,7 +691,6 @@ export const createLive = (options: CreateLiveOptions): Live => {
       recentTransitions: live.recentTransitions,
       suggestedTransition: live.suggestedTransition,
       track,
-      transitionPicked: live.transitionPicked,
     },
   })
 
@@ -777,10 +767,7 @@ export const createLive = (options: CreateLiveOptions): Live => {
 
     if (lastCurrent === undefined) {
       lastCurrent = snapshotNext.current.clipId
-      if (!requestedOnce) {
-        requestedOnce = true
-        void request()
-      }
+      void request()
     } else if (lastCurrent !== snapshotNext.current.clipId) {
       live = pushHistory(live, lastCurrent)
       if (stagedTransition !== undefined) {
@@ -789,7 +776,7 @@ export const createLive = (options: CreateLiveOptions): Live => {
           recentTransitions: [...live.recentTransitions, stagedTransition.kind].slice(-RECENT_LIMIT),
         }
       }
-      live = { ...live, pickedClipId: undefined, transition: undefined, transitionPicked: false }
+      live = { ...live, pickedClipId: undefined, transition: undefined }
       lastCurrent = snapshotNext.current.clipId
       void request()
     }

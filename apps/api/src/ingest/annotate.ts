@@ -67,7 +67,7 @@ const DESCRIPTION_TIMEOUT_MS = 20_000
 export const withTimeout = async <T>(work: Promise<T>, ms: number, what: string): Promise<T> => {
   const expiry = Promise.withResolvers<never>()
   const timer = setTimeout(() => {
-    expiry.reject(new Error(`annotate: ${what} did not answer within ${ms}ms`))
+    expiry.reject(new Error(`${what} did not answer within ${ms}ms`))
   }, ms)
   try {
     return await Promise.race([work, expiry.promise])
@@ -94,7 +94,7 @@ const tagQuestionId = (name: string): string => `tag:${name}`
  * integer, and §16's transition rules do integer arithmetic on it ("energy +2 or more", "within
  * ±1"). `energyFromScore` below is the one place those two facts are reconciled.
  */
-const ENERGY_LEVELS: readonly string[] = [
+export const ENERGY_LEVELS: readonly string[] = [
   'Still or barely moving: a calm image a viewer could rest on indefinitely.',
   'Gentle: slow drift, a slow colour change, nothing abrupt.',
   'Moderate: continuous visible movement at a comfortable pace.',
@@ -230,7 +230,7 @@ const buildQuestions = (withStills: boolean): JevQuestionSet => ({
  * rather than the check — it exists so an arithmetic slip here cannot produce a 0 or a 6 that the
  * schema below would then reject as if the model had misbehaved.
  */
-const energyFromScore = (score: number): ClipEnergy => {
+export const energyFromScore = (score: number): ClipEnergy => {
   const level = Math.min(5, Math.max(1, Math.round(score) + 1))
   return v.parse(clipEnergySchema, level)
 }

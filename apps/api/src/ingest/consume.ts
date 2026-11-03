@@ -24,23 +24,36 @@ import type { JevImage } from './jev.ts'
  *   and `maxRetries: 2` in `cloudflare.config.ts` bounds even that.
  */
 
-/** The queue message. One clip id; everything else the consumer reads from the row itself. */
-export const ingestMessageSchema = v.strictObject({ clipId: v.pipe(v.string(), v.minLength(1)) })
+/**
+ * The queue message. `trigger` is what lets a clip with stills be annotated once: the registration
+ * message waits long enough for the stills to arrive and then stands down if they already did.
+ */
+export const ingestMessageSchema = v.strictObject({
+  clipId: v.pipe(v.string(), v.minLength(1)),
+  trigger: v.picklist(['registered', 'stills']),
+})
 
 export type IngestMessage = v.InferOutput<typeof ingestMessageSchema>
 
+/** How long a registered clip waits for its stills before it is annotated from its code alone. */
+export const REGISTRATION_DELAY_SECONDS = 60
+
 /**
- * Enqueues a clip for annotation, from the registration route.
- *
- * Takes the binding as `undefined`-able and does nothing when it is absent: local mode (§15.3) has
- * no queue, and registration must still work there. Parsed through the same schema the consumer
- * validates with, so producer and consumer cannot drift apart.
+ * Enqueues a clip for annotation. Void binds a working queue locally too, so local mode is refused
+ * here: a venue has no model to answer, and registration must still succeed (§15.3).
  */
-export const enqueueAnnotation = async (queue: Queue | undefined, clipId: string): Promise<void> => {
-  if (queue === undefined) {
+export const enqueueAnnotation = async (
+  env: Pick<Env, 'QUEUE_INGEST' | 'VEV_MODE'>,
+  clipId: string,
+  trigger: IngestMessage['trigger'],
+): Promise<void> => {
+  if (env.VEV_MODE === 'local' || env.QUEUE_INGEST === undefined) {
     return
   }
-  await queue.send(v.parse(ingestMessageSchema, { clipId }))
+  await env.QUEUE_INGEST.send(
+    v.parse(ingestMessageSchema, { clipId, trigger }),
+    trigger === 'registered' ? { delaySeconds: REGISTRATION_DELAY_SECONDS } : {},
+  )
 }
 
 /** Marks a clip's annotation as failed WITHOUT touching any other column — see this file's header. */
@@ -81,10 +94,11 @@ const loadStills = async (env: Env, clipId: string, keys: readonly string[]): Pr
   }
 }
 
-const annotateOne = async (env: Env, clipId: string): Promise<void> => {
+const annotateOne = async (env: Env, clipId: string, trigger: IngestMessage['trigger']): Promise<void> => {
   const db = drizzle(env.DB)
   const [row] = await db
     .select({
+      annotationStatus: clipsTable.annotationStatus,
       code: clipsTable.code,
       // `deps` is read for annotation too: two of a clip's tags are derived from it rather than
       // asked of a model (see `derivedTags`, `tags.ts`).
@@ -99,6 +113,10 @@ const annotateOne = async (env: Env, clipId: string): Promise<void> => {
   if (row === undefined) {
     // Deleted between enqueue and consumption. Nothing to annotate and nothing to retry.
     console.error(`ingest: clip ${clipId} no longer exists`)
+    return
+  }
+
+  if (trigger === 'registered' && row.annotationStatus !== 'pending') {
     return
   }
 
@@ -156,7 +174,7 @@ const handleMessage = async (message: ConsumerMessage, env: Env): Promise<void> 
   }
 
   try {
-    await annotateOne(env, parsed.output.clipId)
+    await annotateOne(env, parsed.output.clipId, parsed.output.trigger)
     message.ack()
   } catch (error) {
     // Reached only when D1 itself failed: `annotateClip` returns a result rather than throwing, so

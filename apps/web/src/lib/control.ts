@@ -15,7 +15,7 @@ import {
   panicMode,
   reduce,
 } from '@vev/engines'
-import { OUTPUT_CHANNEL, outputMessageSchema } from '@vev/shared'
+import { DEFAULT_TRANSITION, OUTPUT_CHANNEL, outputMessageSchema } from '@vev/shared'
 import type { OutputMessage, Slot, TransitionKind, TransitionSpec } from '@vev/shared'
 import * as v from 'valibot'
 
@@ -33,7 +33,6 @@ const TAP_DEBOUNCE_MS = 50
 const TAP_RESET_MS = 2000
 
 const CUT: TransitionSpec = { bars: 0, kind: 'cut' }
-const CROSSFADE: TransitionSpec = { bars: 2, kind: 'crossfade' }
 
 type Loaded = PlaybackState['current']
 
@@ -237,7 +236,7 @@ export interface Control {
   tick: () => void
 }
 
-const transitionFor = (kind: TransitionKind): TransitionSpec => (kind === 'cut' ? CUT : CROSSFADE)
+const transitionFor = (kind: TransitionKind): TransitionSpec => (kind === 'cut' ? CUT : DEFAULT_TRANSITION)
 
 /**
  * The track cursor. Everything about what is playing still lives in `PlaybackState` — the reducer

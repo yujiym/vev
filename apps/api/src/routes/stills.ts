@@ -90,7 +90,7 @@ export const clipStillsRoutes = new Hono<{ Bindings: Env }>().post('/:id/stills'
   await db.update(clipsTable).set({ stillKeys: keys }).where(eq(clipsTable.id, id))
 
   try {
-    await enqueueAnnotation(c.env.VEV_MODE === 'local' ? undefined : c.env.QUEUE_INGEST, id)
+    await enqueueAnnotation(c.env, id, 'stills')
   } catch (error) {
     console.error(`stills: could not re-enqueue annotation for ${id}`, error)
   }

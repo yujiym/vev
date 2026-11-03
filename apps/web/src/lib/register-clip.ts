@@ -6,6 +6,7 @@ import type { Clip, EngineKind, NewClip, NewClipOrigin } from '@vev/shared'
 import { clipSchema, newClipSchema } from '@vev/shared'
 import * as v from 'valibot'
 
+import { failure } from './library.ts'
 import type { Compositor } from './output-client.ts'
 import { dominantColours, readCanvasPixelsSync, recordThumbnail } from './palette.ts'
 import type { SampledFrame } from './palette.ts'
@@ -259,22 +260,6 @@ export const captureThumbnail = async (
 }
 
 const REGISTER_CLIP_ENDPOINT = '/api/clips'
-
-/**
- * The error to throw for a non-OK response: the route's own message body when it sent one, and
- * only the status when it did not.
- *
- * Every refusal `POST /api/clips` makes names what is wrong and what to do about it — the §14.2
- * licence rule, the palette format, a multi-output clip, a taken slug. Throwing
- * `failed with 400` instead discards all of it, and the registration page renders whatever this
- * throws verbatim. `$lib/track-editor.ts`'s `failure` and `$lib/library.ts`'s `fetchLibrary`
- * already do this; registration is the path where it matters most, since it is the only one
- * where the person reading the message is the person who can fix the thing.
- */
-const failure = async (response: Response, what: string): Promise<Error> => {
-  const detail = await response.text().catch(() => '')
-  return new Error(detail === '' ? `${what} failed with ${response.status}` : detail)
-}
 
 /**
  * Registers a clip: `POST /api/clips` with `payload`, parsed back through `clipSchema` so a caller

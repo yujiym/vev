@@ -16,7 +16,7 @@
    * (ADR 0001).
    */
 
-  let view = $state<LiveView | undefined>()
+  let view = $state.raw<LiveView | undefined>()
   let control: Control | undefined
   let live: Live | undefined
 

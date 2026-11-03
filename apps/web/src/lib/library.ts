@@ -68,6 +68,12 @@ export const filterClips = (clips: readonly ClipSummary[], filters: LibraryFilte
 
 const clipListSchema = v.object({ clips: v.array(clipSummarySchema) })
 
+/** An error carrying the route's own text, since a status code alone tells the reader nothing to act on. */
+export const failure = async (response: Response, what: string): Promise<Error> => {
+  const detail = await response.text().catch(() => '')
+  return new Error(detail === '' ? `${what} failed with ${response.status}` : detail)
+}
+
 /**
  * Fetches the library, server-filtered where the route can and browser-filtered where it cannot.
  * A non-OK response throws with the route's own message body — `GET /api/clips` refuses a bad
@@ -81,8 +87,7 @@ export const fetchLibrary = async (
   const endpoint = `${CLIPS_ENDPOINT}${libraryQuery(filters)}`
   const response = await fetchImpl(endpoint)
   if (!response.ok) {
-    const detail = await response.text().catch(() => '')
-    throw new Error(detail === '' ? `GET ${endpoint} failed with ${response.status}` : detail)
+    throw await failure(response, `GET ${endpoint}`)
   }
 
   const { clips } = v.parse(clipListSchema, await response.json())
@@ -98,10 +103,7 @@ export const fetchClip = async (id: string, fetchImpl: typeof fetch = fetch): Pr
   const endpoint = `${CLIPS_ENDPOINT}/${id}`
   const response = await fetchImpl(endpoint)
   if (!response.ok) {
-    // The route's own text, exactly as `fetchLibrary` above does with it — a status code alone
-    // tells the panel's user nothing about which clip a track could not load.
-    const detail = await response.text().catch(() => '')
-    throw new Error(detail === '' ? `GET ${endpoint} failed with ${response.status}` : detail)
+    throw await failure(response, `GET ${endpoint}`)
   }
 
   return v.parse(clipSchema, await response.json())

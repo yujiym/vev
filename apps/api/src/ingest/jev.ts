@@ -61,7 +61,7 @@ import * as v from 'valibot'
  */
 
 /** Third-party model billed from prepaid AI Gateway credits, not from Workers Paid neurons. Pinned — see the header. */
-const JEV_MODEL = 'typesafe/jev-1.14.0'
+export const JEV_MODEL = 'typesafe/jev-1.14.0'
 
 /**
  * The narrow slice of the `AI` binding this module (and the description call in `annotate.ts`)

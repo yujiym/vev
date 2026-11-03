@@ -4,6 +4,7 @@ import { newTrackSchema, trackSchema } from '@vev/shared'
 import * as v from 'valibot'
 
 import type { PlayableClip, TrackStep } from './control.ts'
+import { failure } from './library.ts'
 
 /**
  * The track editor's logic, kept out of `.svelte` because `.svelte` is outside the type and lint
@@ -114,16 +115,6 @@ export const buildNewTrack = (draft: TrackDraft): NewTrack =>
     title: draft.title,
     visibility: draft.visibility,
   })
-
-/**
- * The body of a non-OK response, as the error a caller can put on screen. The track routes refuse
- * with `c.text(...)`, and those messages are the whole point of the §14.2 check — a refusal that
- * reaches the performer as "400" names nothing and helps nobody.
- */
-const failure = async (response: Response, what: string): Promise<Error> => {
-  const detail = await response.text().catch(() => '')
-  return new Error(detail === '' ? `${what} failed with ${response.status}` : detail)
-}
 
 export const createTrack = async (draft: TrackDraft, fetchImpl: typeof fetch = fetch): Promise<Track> => {
   const response = await fetchImpl(TRACKS_ENDPOINT, {

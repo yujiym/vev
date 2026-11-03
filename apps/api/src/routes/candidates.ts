@@ -7,12 +7,12 @@ import {
   candidateRequestSchema,
   candidateResponseSchema,
   candidateResultSchema,
-  clipEnergySchema,
   DEFAULT_PROVIDER_ID,
+  DEFAULT_TRANSITION,
   decisionStateSchema,
 } from '@vev/shared'
-import type { CandidateClip, CandidateResult, ClipEnergy, DecisionState, TransitionSpec } from '@vev/shared'
-import { asc, eq } from 'drizzle-orm'
+import type { CandidateClip, CandidateResult, ClipEnergy, DecisionState } from '@vev/shared'
+import { eq } from 'drizzle-orm'
 import { drizzle } from 'drizzle-orm/d1'
 import { Hono } from 'hono'
 import * as v from 'valibot'
@@ -20,6 +20,7 @@ import * as v from 'valibot'
 import { clipsTable } from '../db/clips.ts'
 import { tracksTable } from '../db/tracks.ts'
 import type { Env } from '../env.ts'
+import { ENERGY_LEVELS, energyFromScore, withTimeout } from '../ingest/annotate.ts'
 import type { AiRunner } from '../ingest/jev.ts'
 import { askJev, choiceQuestion, scoreQuestion } from '../ingest/jev.ts'
 
@@ -32,52 +33,6 @@ const DECISION_TIMEOUT_MS = 800
 
 /** The control screen shows three candidates (spec §7, §8.1 step 4). */
 const RETURNED_CANDIDATES = 3
-
-/** Spec §9.1 calls crossfade the default transition; a request with no track still needs one. */
-const DEFAULT_TRANSITION: TransitionSpec = { bars: 2, kind: 'crossfade' }
-
-/**
- * The five levels of the `score` question, lowest first. jev scores are zero-based across however
- * many criteria are given, so five descriptions are energy 1-5 once `energyFromScore` converts.
- */
-const INTENSITY_LEVELS: readonly string[] = [
-  'Still or barely moving: a calm image a viewer could rest on indefinitely.',
-  'Gentle: slow drift, a slow colour change, nothing abrupt.',
-  'Moderate: continuous visible movement at a comfortable pace.',
-  'Busy: fast movement, strong contrast changes, several things happening at once.',
-  'Overwhelming: violent, strobing or chaotic — the most intense a clip gets.',
-]
-
-interface CandidateRow {
-  readonly annotationStatus: CandidateClip['annotationStatus']
-  readonly commercialOk: boolean
-  readonly deps: { readonly usesFeedback: boolean }
-  readonly description: string | null
-  readonly energy: ClipEnergy | null
-  readonly engine: CandidateClip['engine']
-  readonly id: string
-  readonly tags: string[] | null
-}
-
-/**
- * Rejects `work` if it has not settled within `ms`. The timer is always cleared, so a call that
- * answered in time does not keep the isolate alive waiting for a timeout that no longer matters.
- */
-const settleWithin = async <T>(work: Promise<T>, ms: number): Promise<T> => {
-  const expiry = Promise.withResolvers<never>()
-  const timer = setTimeout(() => {
-    expiry.reject(new Error(`candidates: the decision provider did not answer within ${ms}ms`))
-  }, ms)
-  try {
-    return await Promise.race([work, expiry.promise])
-  } finally {
-    clearTimeout(timer)
-  }
-}
-
-/** jev answers a float across the zero-based levels 0-4; `Clip.energy` is 1-5. */
-const energyFromScore = (score: number): ClipEnergy =>
-  v.parse(clipEnergySchema, Math.min(5, Math.max(1, Math.round(score) + 1)))
 
 /** A candidate as the model sees it in a `choice` option; its title is not part of the decision state (§8.2). */
 const describe = (clip: CandidateClip): string =>
@@ -108,12 +63,13 @@ const askModel = async (
   const options = Object.fromEntries(clips.map((clip) => [clip.id, describe(clip)]))
 
   try {
-    const answers = await settleWithin(
+    const answers = await withTimeout(
       askJev(ai, JSON.stringify(state), {
-        energy: scoreQuestion('How intense should the next clip be?', INTENSITY_LEVELS),
+        energy: scoreQuestion('How intense should the next clip be?', ENERGY_LEVELS),
         next: choiceQuestion('Which clip should play next?', options),
       }),
       DECISION_TIMEOUT_MS,
+      'candidates: the decision provider',
     )
 
     const { next, energy: intensity } = answers
@@ -140,19 +96,14 @@ const askModel = async (
  * dress a rule score up as the model's. `source` is what tells them apart.
  */
 const putChoiceFirst = (ranked: readonly RankedCandidate[], answer: ModelAnswer): RankedCandidate[] => {
-  const choiceIndex = ranked.findIndex((candidate) => candidate.clip.id === answer.chosenId)
-  if (choiceIndex === -1) {
-    return [...ranked]
-  }
-
-  const chosen = ranked[choiceIndex]
+  const chosen = ranked.find((candidate) => candidate.clip.id === answer.chosenId)
   if (chosen === undefined) {
     return [...ranked]
   }
 
   return [
     { ...chosen, score: answer.confidence ?? chosen.score },
-    ...ranked.filter((_, index) => index !== choiceIndex),
+    ...ranked.filter((candidate) => candidate !== chosen),
   ]
 }
 
@@ -212,14 +163,13 @@ export const candidatesRoutes = new Hono<{ Bindings: Env }>().post(
         tags: clipsTable.tags,
       })
       .from(clipsTable)
-      .orderBy(asc(clipsTable.title))
 
     const current = rows.find((row) => row.id === body.currentClipId)
     if (current === undefined) {
       return c.text('Not Found', 404)
     }
 
-    const clips = rows.map((row: CandidateRow) =>
+    const clips = rows.map((row) =>
       v.parse(candidateClipSchema, {
         annotationStatus: row.annotationStatus,
         commercialOk: row.commercialOk,

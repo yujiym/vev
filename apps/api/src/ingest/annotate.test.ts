@@ -14,9 +14,9 @@ import { describe, expect, it, vi } from 'vitest'
 import type { Env } from '../env.ts'
 import worker from '../index.ts'
 import { annotateClip } from './annotate.ts'
-import { enqueueAnnotation, ingestQueue } from './consume.ts'
+import { enqueueAnnotation, ingestQueue, REGISTRATION_DELAY_SECONDS } from './consume.ts'
 import type { AiRunner, JevImage } from './jev.ts'
-import { askJev, choiceQuestion, noulQuestion, scoreQuestion } from './jev.ts'
+import { askJev, choiceQuestion, JEV_MODEL, noulQuestion, scoreQuestion } from './jev.ts'
 import { TAG_THRESHOLD, TAG_VOCABULARY } from './tags.ts'
 
 /**
@@ -36,8 +36,6 @@ import { TAG_THRESHOLD, TAG_VOCABULARY } from './tags.ts'
  *    response. That is what lets a test assert the enum keys actually offered to jev — a missing
  *    option description is invisible to any test that only checks the answer.
  */
-
-const JEV_MODEL = 'typesafe/jev-1.14.0'
 
 /** 3.2 over jev's zero-based levels 0-4 rounds to level 3, which is `energy` 4. */
 const CANNED_ENERGY_SCORE = 3.2
@@ -717,7 +715,7 @@ describe('the ingest queue consumer', () => {
     const id = crypto.randomUUID()
     await insertClip(id)
 
-    const result = await runQueue({ clipId: id }, createFakeAi())
+    const result = await runQueue({ clipId: id, trigger: 'stills' }, createFakeAi())
     expect(result.explicitAcks).toContain('message-under-test')
 
     const row = await readClip(id)
@@ -732,10 +730,33 @@ describe('the ingest queue consumer', () => {
     })
   })
 
+  it('annotates once: the registration message stands down after the stills message has run', async () => {
+    const id = crypto.randomUUID()
+    await insertClip(id)
+    await runQueue({ clipId: id, trigger: 'stills' }, createFakeAi())
+
+    const result = await runQueue(
+      { clipId: id, trigger: 'registered' },
+      { run: async () => await Promise.reject(new Error('a second annotation must not call the model')) },
+    )
+
+    expect(result.explicitAcks).toContain('message-under-test')
+    const { annotation_status: status } = await readClip(id)
+    expect(status).toBe('ok')
+  })
+
+  it('annotates a clip whose stills never came when the registration message arrives', async () => {
+    const id = crypto.randomUUID()
+    await insertClip(id)
+    await runQueue({ clipId: id, trigger: 'registered' }, createFakeAi())
+    const { annotation_status: status } = await readClip(id)
+    expect(status).toBe('ok')
+  })
+
   it('never touches palette, which is computed from rendered frames rather than annotated', async () => {
     const id = crypto.randomUUID()
     await insertClip(id)
-    await runQueue({ clipId: id }, createFakeAi())
+    await runQueue({ clipId: id, trigger: 'stills' }, createFakeAi())
     const row = await readClip(id)
     expect(row.palette).toBeNull()
   })
@@ -744,7 +765,7 @@ describe('the ingest queue consumer', () => {
     const id = crypto.randomUUID()
     await insertClip(id)
 
-    const result = await runQueue({ clipId: id }, createFakeAi({ jevThrows: true }))
+    const result = await runQueue({ clipId: id, trigger: 'stills' }, createFakeAi({ jevThrows: true }))
     expect(result.explicitAcks).toContain('message-under-test')
     expect(result.retryMessages).toHaveLength(0)
 
@@ -766,7 +787,7 @@ describe('the ingest queue consumer', () => {
     const inserted = await readClip(id)
     const before = ownFields(inserted)
 
-    await runQueue({ clipId: id }, createFakeAi({ jevThrows: true }))
+    await runQueue({ clipId: id, trigger: 'stills' }, createFakeAi({ jevThrows: true }))
 
     const after = await readClip(id)
     expect(ownFields(after)).toStrictEqual(before)
@@ -776,7 +797,7 @@ describe('the ingest queue consumer', () => {
     const id = crypto.randomUUID()
     await insertClip(id)
 
-    const result = await runQueue({ clipId: id })
+    const result = await runQueue({ clipId: id, trigger: 'stills' })
     expect(result.explicitAcks).toContain('message-under-test')
     const row = await readClip(id)
     expect(row.annotation_status).toBe('failed')
@@ -789,7 +810,7 @@ describe('the ingest queue consumer', () => {
   })
 
   it('acks a message naming a clip that no longer exists', async () => {
-    const result = await runQueue({ clipId: crypto.randomUUID() }, createFakeAi())
+    const result = await runQueue({ clipId: crypto.randomUUID(), trigger: 'stills' }, createFakeAi())
     expect(result.explicitAcks).toContain('message-under-test')
     expect(result.retryMessages).toHaveLength(0)
   })
@@ -811,7 +832,7 @@ describe('the ingest queue consumer — stills', () => {
     await insertClip(id, keys)
 
     const ai = createFakeAi()
-    await runQueue({ clipId: id }, ai)
+    await runQueue({ clipId: id, trigger: 'stills' }, ai)
 
     expect(framesOf(firstJevRequest(ai))).toStrictEqual([3, 1, 2].map((tail) => [...stillBytes(tail)]))
     const { annotation_status: status } = await readClip(id)
@@ -823,7 +844,7 @@ describe('the ingest queue consumer — stills', () => {
     await insertClip(id, [`stills/${id}/0.jpg`, `stills/${id}/1.jpg`])
 
     const ai = createFakeAi()
-    await runQueue({ clipId: id }, ai)
+    await runQueue({ clipId: id, trigger: 'stills' }, ai)
 
     expect(jevCalls(ai)).toHaveLength(1)
     expect(firstJevRequest(ai).assets).toBeUndefined()
@@ -837,7 +858,7 @@ describe('the ingest queue consumer — stills', () => {
     await insertClip(id, [`stills/${id}/0.jpg`, `stills/${id}/1.jpg`])
 
     const ai = createFakeAi()
-    await runQueue({ clipId: id }, ai)
+    await runQueue({ clipId: id, trigger: 'stills' }, ai)
 
     expect(framesOf(firstJevRequest(ai))).toStrictEqual([[...stillBytes(7)]])
   })
@@ -848,7 +869,7 @@ describe('the ingest queue consumer — stills', () => {
     await insertClip(id, [`stills/${id}/0.jpg`])
 
     const ai = createFakeAi({ imageCallsThrow: true })
-    const result = await runQueue({ clipId: id }, ai)
+    const result = await runQueue({ clipId: id, trigger: 'stills' }, ai)
 
     expect(result.explicitAcks).toContain('message-under-test')
     expect(annotatedFields(await readClip(id))).toStrictEqual({
@@ -868,7 +889,7 @@ describe('the ingest queue consumer — stills', () => {
     await insertClip(id, [`stills/${id}/0.jpg`])
 
     const ai = createFakeAi({ jevThrows: true })
-    const result = await runQueue({ clipId: id }, ai)
+    const result = await runQueue({ clipId: id, trigger: 'stills' }, ai)
 
     expect(result.explicitAcks).toContain('message-under-test')
     expect(jevCalls(ai)).toHaveLength(2)
@@ -877,16 +898,35 @@ describe('the ingest queue consumer — stills', () => {
   })
 })
 
+const fakeQueue = () => {
+  const sent: { body: unknown; options: unknown }[] = []
+  const send = async (body: unknown, options: unknown) => await Promise.resolve(sent.push({ body, options }))
+  // SAFETY: `enqueueAnnotation` calls only `send`, which is the part of `Queue` this fake supplies.
+  return { queue: { send } as unknown as Queue, sent }
+}
+
 describe(enqueueAnnotation, () => {
-  it('sends the clip id in the shape the consumer parses', async () => {
-    const sent: unknown[] = []
-    const queue = { send: async (body: unknown) => await Promise.resolve(sent.push(body)) }
-    await enqueueAnnotation(queue as unknown as Queue, 'clip-being-registered')
-    expect(sent).toStrictEqual([{ clipId: 'clip-being-registered' }])
+  it('makes a registered clip wait for its stills, and sends stills at once', async () => {
+    const { queue, sent } = fakeQueue()
+    await enqueueAnnotation({ QUEUE_INGEST: queue, VEV_MODE: 'cloud' }, 'clip', 'registered')
+    await enqueueAnnotation({ QUEUE_INGEST: queue, VEV_MODE: 'cloud' }, 'clip', 'stills')
+    expect(sent).toStrictEqual([
+      {
+        body: { clipId: 'clip', trigger: 'registered' },
+        options: { delaySeconds: REGISTRATION_DELAY_SECONDS },
+      },
+      { body: { clipId: 'clip', trigger: 'stills' }, options: {} },
+    ])
   })
 
-  it('does nothing when there is no queue binding, so local mode can still register', async () => {
-    await expect(enqueueAnnotation(undefined, 'clip-being-registered')).resolves.toBeUndefined()
+  it('sends nothing in local mode, even though Void binds a local queue', async () => {
+    const { queue, sent } = fakeQueue()
+    await enqueueAnnotation({ QUEUE_INGEST: queue, VEV_MODE: 'local' }, 'clip', 'registered')
+    expect(sent).toStrictEqual([])
+  })
+
+  it('does nothing when there is no queue binding', async () => {
+    await expect(enqueueAnnotation({ VEV_MODE: 'cloud' }, 'clip', 'registered')).resolves.toBeUndefined()
   })
 })
 
@@ -1032,7 +1072,7 @@ describe('registration enqueues annotation', () => {
 
     expect(response.status).toBe(201)
     const registered = v.parse(v.object({ id: v.string() }), await response.json())
-    expect(sent).toStrictEqual([{ clipId: registered.id }])
+    expect(sent).toStrictEqual([{ clipId: registered.id, trigger: 'registered' }])
   })
 
   it('still registers the clip when there is no queue binding at all', async () => {

@@ -14,6 +14,9 @@ export const transitionSpecSchema = v.object({
   kind: v.picklist(['cut', 'crossfade']),
 })
 
+/** Spec §9.1 calls crossfade the default transition. */
+export const DEFAULT_TRANSITION: TransitionSpec = { bars: 2, kind: 'crossfade' }
+
 export type Slot = v.InferOutput<typeof slotSchema>
 export type PanicMode = v.InferOutput<typeof panicModeSchema>
 export type TransitionKind = TransitionSpec['kind']

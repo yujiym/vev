@@ -140,7 +140,7 @@ describe('POST /api/clips/:id/stills', () => {
     expect(response.status).toBe(400)
   })
 
-  it('enqueues annotation again, because registration enqueued it before any still existed', async () => {
+  it('enqueues annotation at once, because registration only left a delayed message before any still existed', async () => {
     const clipId = await registerClip()
     const sent: unknown[] = []
     const queue = { send: async (body: unknown) => await Promise.resolve(sent.push(body)) }
@@ -158,7 +158,7 @@ describe('POST /api/clips/:id/stills', () => {
     await waitOnExecutionContext(ctx)
 
     expect(response.status).toBe(201)
-    expect(sent).toStrictEqual([{ clipId }])
+    expect(sent).toStrictEqual([{ clipId, trigger: 'stills' }])
   })
 
   it('still records the stills when there is no queue binding', async () => {
