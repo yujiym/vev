@@ -180,7 +180,7 @@ export const clipFlags = (clip: ClipSummary): readonly ClipFlag[] => {
  * `/media/:key` is the public route (`apps/api/src/routes/media.ts`); the key itself is what the
  * row stores, deliberately not a URL, so no hostname is baked into the database.
  */
-export const thumbnailUrl = (clip: ClipSummary): string | undefined =>
+export const thumbnailUrl = (clip: { readonly thumbnailKey?: string | undefined }): string | undefined =>
   clip.thumbnailKey === undefined ? undefined : `/media/${clip.thumbnailKey}`
 
 /** Every tag present in a set of clips, de-duplicated and sorted — the tag filter's options. */

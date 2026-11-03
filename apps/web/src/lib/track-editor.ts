@@ -181,7 +181,9 @@ export const fetchTracks = async (fetchImpl: typeof fetch = fetch): Promise<Trac
 /** A track with every clip it needs already fetched, ready to hand to `Control.loadTrack`. */
 export interface ResolvedTrack {
   readonly clips: readonly PlayableClip[]
+  readonly defaultTransition: TransitionSpec
   readonly id: string
+  readonly mode: Track['mode']
   readonly steps: readonly TrackStep[]
   readonly title: string
 }
@@ -213,11 +215,20 @@ export const resolveTrack = (track: Track, clips: ReadonlyMap<string, Clip>): Re
     steps.push({
       bars: item.bars ?? clip.defaultBars,
       clipId: clip.id,
+      section: item.section,
+      title: clip.title,
       transition: item.transitionIn ?? track.defaultTransition,
     })
   }
 
-  return { clips: playable, id: track.id, steps, title: track.title }
+  return {
+    clips: playable,
+    defaultTransition: track.defaultTransition,
+    id: track.id,
+    mode: track.mode,
+    steps,
+    title: track.title,
+  }
 }
 
 /**

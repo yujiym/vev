@@ -218,18 +218,24 @@ describe(resolveTrack, () => {
     const track = storedTrack({ items: [{ clipId: 'clip-1' }] })
 
     expect(resolveTrack(track, clips).steps).toStrictEqual([
-      { bars: 16, clipId: 'clip-1', transition: { bars: 2, kind: 'crossfade' } },
+      {
+        bars: 16,
+        clipId: 'clip-1',
+        section: undefined,
+        title: 'Clip one',
+        transition: { bars: 2, kind: 'crossfade' },
+      },
     ])
   })
 
   it('prefers the item’s own bars and transitionIn over both defaults', () => {
     const clips = new Map([['clip-1', storedClip({ defaultBars: 16 })]])
     const track = storedTrack({
-      items: [{ bars: 3, clipId: 'clip-1', transitionIn: { bars: 0, kind: 'cut' } }],
+      items: [{ bars: 3, clipId: 'clip-1', section: 'peak', transitionIn: { bars: 0, kind: 'cut' } }],
     })
 
     expect(resolveTrack(track, clips).steps).toStrictEqual([
-      { bars: 3, clipId: 'clip-1', transition: { bars: 0, kind: 'cut' } },
+      { bars: 3, clipId: 'clip-1', section: 'peak', title: 'Clip one', transition: { bars: 0, kind: 'cut' } },
     ])
   })
 

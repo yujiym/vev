@@ -11,8 +11,18 @@ export { FIXTURES } from './fixtures.ts'
 // `@vev/engines/hydra`: they are string transforms over clip source with no renderer behind them,
 // and `@vev/ingest` and `apps/api` both need them in a Worker, where `hydra-synth` cannot go.
 export { countOutCalls, MULTI_OUTPUT_MESSAGE, outCallTargets, rewriteOut } from './hydra/rewrite.ts'
-export { canGo, canGoNow, canQueue, canSetTransition, initialPlayback, reduce } from './playback.ts'
-export type { PlaybackEvent, PlaybackState } from './playback.ts'
+export {
+  canBack,
+  canGo,
+  canGoNow,
+  canQueue,
+  canSetTransition,
+  initialPlayback,
+  isHeld,
+  panicMode,
+  reduce,
+} from './playback.ts'
+export type { PanicMode, PlaybackEvent, PlaybackState } from './playback.ts'
 export { fadeProgress } from './transition.ts'
 // Slot and TransitionSpec are @vev/shared's; they are not re-exported here, so there
 // is one import path for them and no chance of two definitions drifting apart.

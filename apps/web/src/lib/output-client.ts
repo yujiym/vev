@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import type { Clock } from '@vev/engines'
 import { OUTPUT_CHANNEL, outputMessageSchema } from '@vev/shared'
-import type { OutputMessage, Slot, TransitionSpec } from '@vev/shared'
+import type { OutputMessage, PanicMode, Slot, TransitionSpec } from '@vev/shared'
 import * as v from 'valibot'
 
 type ClockMessage = Extract<OutputMessage, { kind: 'clock' }>
@@ -11,6 +11,8 @@ export type SwitchMessage = Extract<OutputMessage, { kind: 'switch' }>
 export interface OutputHandlers {
   onClock: (message: ClockMessage) => void
   onLoad: (message: LoadMessage) => void
+  /** Output-wide panic (§7). The output window decides what each mode does to the picture. */
+  onPanic: (mode: PanicMode) => void
   onSwitch: (message: SwitchMessage) => void
 }
 
@@ -49,6 +51,8 @@ export const subscribeOutput = (
         handlers.onSwitch(message)
       } else if (message.kind === 'clock') {
         handlers.onClock(message)
+      } else if (message.kind === 'panic') {
+        handlers.onPanic(message.mode)
       }
     } catch (error) {
       // A handler throwing here must not kill the channel for the rest of the
@@ -116,6 +120,13 @@ export interface StartOutputOptions {
   createCompositor?: (clock: Clock) => Compositor | Promise<Compositor>
   /** Wall-clock now, per spec: `Date.now()`, never `performance.now()`. */
   now?: () => number
+  /**
+   * Told whenever panic changes, so the output route can paint blackout over the canvas (a
+   * WebGL context cannot be cleared from here without the compositor's cooperation). Optional:
+   * `freeze` is handled inside this module by pausing the compositor, and a caller that ignores
+   * blackout still renders normally rather than failing.
+   */
+  onPanic?: (mode: PanicMode) => void
   /**
    * Called (no argument — the error itself is always logged via
    * `console.error` separately, for the console) if building or mounting the
@@ -210,6 +221,7 @@ export const startOutput = (options: StartOutputOptions): (() => void) => {
     channel = new BroadcastChannel(OUTPUT_CHANNEL),
     createCompositor = defaultCreateCompositor,
     now = Date.now,
+    onPanic: panicChanged = noop,
     onStartupError = noop,
     requestFrame = defaultRequestFrame,
     subscribeResize = defaultSubscribeResize,
@@ -217,6 +229,8 @@ export const startOutput = (options: StartOutputOptions): (() => void) => {
   } = options
 
   let pendingSwitch: SwitchMessage | undefined
+  /** Panic is a pause of the picture, not of the show: the control window keeps running. */
+  let panic: PanicMode = 'none'
   let stopped = false
   let disposed = false
   let frame: number | undefined
@@ -248,6 +262,10 @@ export const startOutput = (options: StartOutputOptions): (() => void) => {
       onLoad: (message) => {
         compositor?.load(message.slot, message.clip.code)
       },
+      onPanic: (mode) => {
+        panic = mode
+        panicChanged(mode)
+      },
       onSwitch: (message) => {
         // Apply an already-due pending switch before this one replaces it —
         // see the module doc above (the `handleHello` double-switch case).
@@ -263,8 +281,13 @@ export const startOutput = (options: StartOutputOptions): (() => void) => {
   })
 
   const loop = (): void => {
-    flushDueSwitch()
-    compositor?.tick(now())
+    // Freeze holds the last frame by not rendering one; blackout still renders, because the
+    // picture underneath must be current the instant the performer lifts it. A held switch is
+    // not flushed while frozen either — it would complete invisibly behind the freeze.
+    if (panic !== 'freeze') {
+      flushDueSwitch()
+      compositor?.tick(now())
+    }
     frame = requestFrame(loop)
   }
 

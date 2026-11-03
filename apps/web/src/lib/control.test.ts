@@ -454,6 +454,7 @@ describe(createControl, () => {
       { beatsPerBar: 4, bpm: 120, downbeatAt: 1000, kind: 'clock' },
       { clip: { code: FIXTURES[0].code, id: 'quiet' }, kind: 'load', slot: 'a' },
       { clip: { code: FIXTURES[1].code, id: 'loud' }, kind: 'load', slot: 'b' },
+      { kind: 'panic', mode: 'none' },
       { at: 1000, kind: 'switch', to: 'a', transition: { bars: 0, kind: 'cut' } },
     ])
   })
@@ -603,6 +604,8 @@ describe('track playback', () => {
     expect(snapshot.next?.clipId).toBe('one')
     expect(snapshot.track).toStrictEqual({
       autoAdvance: true,
+      bars: 4,
+      elapsedBars: 0,
       index: -1,
       length: 3,
       queued: 0,
@@ -1014,8 +1017,10 @@ describe('what the panel may offer', () => {
     control.tick()
 
     const hints = controlHints(control.getSnapshot())
-    const shown = [hints.go, hints.queue, hints.track, hints.transition].filter((hint) => hint !== undefined)
-    expect(shown).toHaveLength(4)
+    const shown = [hints.back, hints.go, hints.queue, hints.track, hints.transition].filter(
+      (hint) => hint !== undefined,
+    )
+    expect(shown).toHaveLength(5)
     expect(shown.every((hint) => hint.includes('Fade in progress'))).toBe(true)
   })
 
@@ -1024,10 +1029,144 @@ describe('what the panel may offer', () => {
     control.queue('one')
 
     expect(controlHints(control.getSnapshot())).toStrictEqual({
+      back: 'Nothing to go back to yet.',
       go: undefined,
       queue: undefined,
       track: undefined,
       transition: undefined,
     })
+  })
+})
+
+describe('transport controls', () => {
+  it('Hold pauses auto-advance without stopping the clip, and releasing it lets the step come due', () => {
+    const clockNow = createFakeNow(0)
+    const { control, messages } = trackControl(clockNow)
+    control.loadTrack(cutTrack(4))
+
+    clockNow.set(500)
+    control.go()
+    clockNow.set(2000)
+    control.tick()
+
+    control.hold()
+    const beforeHold = messages.length
+    clockNow.set(8000)
+    control.tick()
+    clockNow.set(10_000)
+    control.tick()
+
+    expect(messages).toHaveLength(beforeHold)
+    expect(control.getSnapshot()).toMatchObject({
+      current: { clipId: 'one' },
+      held: true,
+      track: { index: 0 },
+    })
+
+    control.hold()
+    clockNow.set(10_001)
+    control.tick()
+    expect(control.getSnapshot().held).toBe(false)
+    expect(messages.at(-1)).toMatchObject({ at: 12_000, kind: 'switch', to: 'a' })
+  })
+
+  it('Back returns to the previous clip and rewinds the track cursor', () => {
+    const clockNow = createFakeNow(0)
+    const { control, messages } = trackControl(clockNow)
+    control.loadTrack(cutTrack(4))
+
+    clockNow.set(500)
+    control.go()
+    clockNow.set(2000)
+    control.tick()
+    clockNow.set(8000)
+    control.tick()
+    clockNow.set(10_000)
+    control.tick()
+    expect(control.getSnapshot()).toMatchObject({ current: { clipId: 'two' }, track: { index: 1 } })
+
+    messages.length = 0
+    control.back()
+
+    expect(control.getSnapshot()).toMatchObject({ current: { clipId: 'one' }, track: { index: 0 } })
+    expect(messages).toMatchObject([
+      { clip: { id: 'one' }, kind: 'load', slot: 'b' },
+      { at: 10_000, kind: 'switch', to: 'b', transition: CUT_SPEC },
+    ])
+  })
+
+  it('overriding Next after the last track item leaves the cursor on that item', () => {
+    const clockNow = createFakeNow(0)
+    const { control } = trackControl(clockNow)
+    control.loadTrack(track([{ bars: 4, clipId: 'one', transition: CUT_SPEC }]))
+    clockNow.set(500)
+    control.go()
+    clockNow.set(2000)
+    control.tick()
+    expect(control.getSnapshot().track).toMatchObject({ index: 0, length: 1, queued: 0 })
+
+    control.overrideNext('two')
+
+    expect(control.getSnapshot().next?.clipId).toBe('two')
+    expect(control.getSnapshot().track).toMatchObject({ index: 0, queued: 0 })
+  })
+
+  it('overriding Next mid-track makes the override the next item and carries on after it', () => {
+    const clockNow = createFakeNow(0)
+    const { control } = trackControl(clockNow)
+    control.loadTrack(cutTrack(4))
+    clockNow.set(500)
+    control.go()
+    clockNow.set(2000)
+    control.tick()
+
+    control.overrideNext('three')
+    expect(control.getSnapshot()).toMatchObject({ next: { clipId: 'three' }, track: { index: 0, queued: 1 } })
+
+    clockNow.set(2500)
+    control.go()
+    clockNow.set(4000)
+    control.tick()
+    expect(control.getSnapshot()).toMatchObject({
+      current: { clipId: 'three' },
+      track: { index: 1, queued: 2 },
+    })
+  })
+
+  it('a Hold pressed while a switch is armed survives the landing', () => {
+    const clockNow = createFakeNow(0)
+    const { control } = trackControl(clockNow)
+    control.loadTrack(cutTrack(4))
+    clockNow.set(500)
+    control.go()
+    control.hold()
+    clockNow.set(2000)
+    control.tick()
+
+    expect(control.getSnapshot()).toMatchObject({ current: { clipId: 'one' }, held: true })
+  })
+
+  it('Blackout and Freeze publish their panic state for the output window', () => {
+    const clockNow = createFakeNow(0)
+    const { control, messages } = trackControl(clockNow)
+
+    control.blackout()
+    expect(control.getSnapshot().panic).toBe('blackout')
+    expect(messages.at(-1)).toStrictEqual({ kind: 'panic', mode: 'blackout' })
+
+    control.freeze()
+    expect(control.getSnapshot().panic).toBe('freeze')
+    expect(messages.at(-1)).toStrictEqual({ kind: 'panic', mode: 'freeze' })
+
+    control.freeze()
+    expect(control.getSnapshot().panic).toBe('none')
+  })
+
+  it('sets a transition with its own bar count, not just a kind', () => {
+    const { control } = trackControl(createFakeNow(0))
+
+    control.setTransition({ bars: 4, kind: 'crossfade' })
+
+    expect(control.getSnapshot().transition).toStrictEqual({ bars: 4, kind: 'crossfade' })
   })
 })

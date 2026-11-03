@@ -46,7 +46,7 @@ describe(subscribeOutput, () => {
     const channel = new FakeChannel()
     const onLoad = vi.fn<() => void>()
     subscribeOutput(
-      { onClock: vi.fn<() => void>(), onLoad, onSwitch: vi.fn<() => void>() },
+      { onClock: vi.fn<() => void>(), onLoad, onPanic: vi.fn<() => void>(), onSwitch: vi.fn<() => void>() },
       channel as unknown as BroadcastChannel,
     )
 
@@ -64,7 +64,7 @@ describe(subscribeOutput, () => {
     const channel = new FakeChannel()
     const onSwitch = vi.fn<() => void>()
     subscribeOutput(
-      { onClock: vi.fn<() => void>(), onLoad: vi.fn<() => void>(), onSwitch },
+      { onClock: vi.fn<() => void>(), onLoad: vi.fn<() => void>(), onPanic: vi.fn<() => void>(), onSwitch },
       channel as unknown as BroadcastChannel,
     )
 
@@ -84,7 +84,7 @@ describe(subscribeOutput, () => {
     const onLoad = vi.fn<() => void>()
     const onSwitch = vi.fn<() => void>()
     subscribeOutput(
-      { onClock: vi.fn<() => void>(), onLoad, onSwitch },
+      { onClock: vi.fn<() => void>(), onLoad, onPanic: vi.fn<() => void>(), onSwitch },
       channel as unknown as BroadcastChannel,
     )
 
@@ -106,7 +106,7 @@ describe(subscribeOutput, () => {
       // check the *behavior* (delivery keeps working), not the log itself.
     })
     subscribeOutput(
-      { onClock: vi.fn<() => void>(), onLoad, onSwitch },
+      { onClock: vi.fn<() => void>(), onLoad, onPanic: vi.fn<() => void>(), onSwitch },
       channel as unknown as BroadcastChannel,
     )
 
@@ -133,7 +133,7 @@ describe(subscribeOutput, () => {
     const channel = new FakeChannel()
     const onLoad = vi.fn<() => void>()
     const unsubscribe = subscribeOutput(
-      { onClock: vi.fn<() => void>(), onLoad, onSwitch: vi.fn<() => void>() },
+      { onClock: vi.fn<() => void>(), onLoad, onPanic: vi.fn<() => void>(), onSwitch: vi.fn<() => void>() },
       channel as unknown as BroadcastChannel,
     )
 
@@ -453,5 +453,84 @@ describe(startOutput, () => {
     expect(scheduler.fire).not.toThrow()
 
     consoleError.mockRestore()
+  })
+})
+
+describe('panic on the output', () => {
+  it('routes a panic message to its handler', () => {
+    const channel = new FakeChannel()
+    const onPanic = vi.fn<(mode: string) => void>()
+    subscribeOutput(
+      {
+        onClock: vi.fn<() => void>(),
+        onLoad: vi.fn<() => void>(),
+        onPanic,
+        onSwitch: vi.fn<() => void>(),
+      },
+      channel as unknown as BroadcastChannel,
+    )
+
+    channel.receive({ kind: 'panic', mode: 'blackout' })
+
+    expect(onPanic).toHaveBeenCalledWith('blackout')
+  })
+
+  it('freeze stops rendering the compositor, and lifting it resumes on the next frame', async () => {
+    const channel = new FakeChannel()
+    const compositor = createFakeCompositor()
+    const scheduler = createFrameScheduler()
+    const onPanic = vi.fn<(mode: string) => void>()
+    const canvas = fakeCanvas()
+
+    startOutput({
+      cancelFrame: scheduler.cancelFrame,
+      canvas,
+      channel: channel as unknown as BroadcastChannel,
+      createCompositor: () => compositor,
+      now: () => 1000,
+      onPanic,
+      requestFrame: scheduler.requestFrame,
+      subscribeResize: noResize,
+      viewportSize: fixedViewport,
+    })
+    await vi.waitFor(() => {
+      expect(compositor.mount).toHaveBeenCalledWith(canvas)
+    })
+
+    channel.receive({ kind: 'panic', mode: 'freeze' })
+    scheduler.fire()
+    expect(compositor.tickCalls()).toStrictEqual([])
+    expect(onPanic).toHaveBeenLastCalledWith('freeze')
+
+    channel.receive({ kind: 'panic', mode: 'none' })
+    scheduler.fire()
+    expect(compositor.tickCalls()).toStrictEqual([1000])
+    expect(onPanic).toHaveBeenLastCalledWith('none')
+  })
+
+  it('blackout keeps rendering underneath, because the picture must be current when it is lifted', async () => {
+    const channel = new FakeChannel()
+    const compositor = createFakeCompositor()
+    const scheduler = createFrameScheduler()
+    const canvas = fakeCanvas()
+
+    startOutput({
+      cancelFrame: scheduler.cancelFrame,
+      canvas,
+      channel: channel as unknown as BroadcastChannel,
+      createCompositor: () => compositor,
+      now: () => 2000,
+      requestFrame: scheduler.requestFrame,
+      subscribeResize: noResize,
+      viewportSize: fixedViewport,
+    })
+    await vi.waitFor(() => {
+      expect(compositor.mount).toHaveBeenCalledWith(canvas)
+    })
+
+    channel.receive({ kind: 'panic', mode: 'blackout' })
+    scheduler.fire()
+
+    expect(compositor.tickCalls()).toStrictEqual([2000])
   })
 })

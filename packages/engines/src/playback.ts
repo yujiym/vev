@@ -1,13 +1,18 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-import type { Slot, TransitionSpec } from '@vev/shared'
+import type { PanicMode, Slot, TransitionSpec } from '@vev/shared'
 
 import { barDurationMs, nextBarAt } from './clock.ts'
 import type { Clock } from './clock.ts'
+
+export type { PanicMode } from '@vev/shared'
 
 interface Loaded {
   clipId: string
   slot: Slot
 }
+
+/** How many clips Back can walk through. A set is long; a stack that grows forever is a leak. */
+const HISTORY_LIMIT = 20
 
 export interface PlaybackState {
   current: Loaded
@@ -17,6 +22,12 @@ export interface PlaybackState {
   firing?: { at: number }
   /** Set while a crossfade is running; absent for a cut, which completes instantly. */
   fading?: { from: Slot; to: Slot; startedAt: number }
+  /** Set by Hold: auto-advance is paused until the performer presses Go again (spec §7). */
+  held?: boolean
+  /** Clips that were current before `current`, most recent last. Back consumes the end. */
+  history?: readonly Loaded[]
+  /** Output-wide panic state. Absent means normal. */
+  panic?: PanicMode
 }
 
 export type PlaybackEvent =
@@ -24,6 +35,10 @@ export type PlaybackEvent =
   | { kind: 'go'; now: number }
   | { kind: 'go-now'; now: number }
   | { kind: 'set-transition'; transition: TransitionSpec }
+  | { kind: 'hold' }
+  | { kind: 'back' }
+  | { kind: 'blackout' }
+  | { kind: 'freeze' }
   | { kind: 'tick'; now: number }
 
 export const initialPlayback = (clipId: string, transition: TransitionSpec): PlaybackState => ({
@@ -63,13 +78,34 @@ export const canQueue = (state: PlaybackState): boolean => state.fading === unde
 /** Changing the transition mid-fade would either cut the fade short or desync it from the output. */
 export const canSetTransition = (state: PlaybackState): boolean => state.fading === undefined
 
+/** Back needs a previous clip to return to, and a fade already in flight would be interrupted. */
+export const canBack = (state: PlaybackState): boolean =>
+  state.fading === undefined && (state.history?.length ?? 0) > 0
+
+/** Hold pauses auto-advance; it does not stop the clip already playing (spec §7). */
+export const isHeld = (state: PlaybackState): boolean => state.held === true
+
+/** What the output should do right now, panic-wise. */
+export const panicMode = (state: PlaybackState): PanicMode => state.panic ?? 'none'
+
 /** The queued clip becomes the current one; both the armed moment and the fade are spent. */
 const complete = (state: PlaybackState): PlaybackState => {
   if (!state.next) {
     return { ...state, fading: undefined, firing: undefined }
   }
 
-  return { current: state.next, transition: state.transition }
+  const next: PlaybackState = {
+    current: state.next,
+    history: [...(state.history ?? []), state.current].slice(-HISTORY_LIMIT),
+    transition: state.transition,
+  }
+  if (state.panic !== undefined) {
+    next.panic = state.panic
+  }
+  if (state.held === true) {
+    next.held = true
+  }
+  return next
 }
 
 const tick = (state: PlaybackState, now: number, clock: Clock): PlaybackState => {
@@ -96,6 +132,44 @@ const tick = (state: PlaybackState, now: number, clock: Clock): PlaybackState =>
   }
 }
 
+/** Back returns through the free buffer, drops anything queued or armed, and keeps what is not about the clip (hold, panic). */
+const back = (state: PlaybackState): PlaybackState => {
+  // `canBack` is the whole rule: there is a previous clip, and no fade is in flight.
+  const history = state.history ?? []
+  const previous = history.at(-1)
+  if (!canBack(state) || previous === undefined) {
+    return state
+  }
+
+  // The control window re-loads the previous clip's code into that slot before asking the output to
+  // cut to it, so a history deeper than the two buffers can still be walked.
+  const returned: PlaybackState = {
+    current: { clipId: previous.clipId, slot: other(state.current.slot) },
+    history: history.slice(0, -1),
+    transition: state.transition,
+  }
+  if (state.held === true) {
+    returned.held = true
+  }
+  if (state.panic !== undefined) {
+    returned.panic = state.panic
+  }
+  return returned
+}
+
+const goNow = (state: PlaybackState, now: number): PlaybackState => {
+  // Mid-fade, "now" means finish it — a press that did nothing would be a silent
+  // swallow, and the performer would press it again into a show that ignores them.
+  if (state.fading) {
+    return { ...complete(state), held: false }
+  }
+  if (!canGoNow(state)) {
+    return state
+  }
+
+  return { ...state, firing: { at: now }, held: false }
+}
+
 export const reduce = (state: PlaybackState, event: PlaybackEvent, clock: Clock): PlaybackState => {
   switch (event.kind) {
     case 'select-next': {
@@ -115,7 +189,9 @@ export const reduce = (state: PlaybackState, event: PlaybackEvent, clock: Clock)
         return state
       }
 
-      return { ...state, firing: { at: nextBarAt(clock, event.now) } }
+      // Pressing Go is an explicit advance, so it releases Hold rather than leaving the show
+      // paused after the one switch the performer asked for.
+      return { ...state, firing: { at: nextBarAt(clock, event.now) }, held: false }
     }
 
     case 'set-transition': {
@@ -131,16 +207,23 @@ export const reduce = (state: PlaybackState, event: PlaybackEvent, clock: Clock)
     }
 
     case 'go-now': {
-      // Mid-fade, "now" means finish it — a press that did nothing would be a silent
-      // swallow, and the performer would press it again into a show that ignores them.
-      if (state.fading) {
-        return complete(state)
-      }
-      if (!canGoNow(state)) {
-        return state
-      }
+      return goNow(state, event.now)
+    }
 
-      return { ...state, firing: { at: event.now } }
+    case 'hold': {
+      return { ...state, held: state.held !== true }
+    }
+
+    case 'back': {
+      return back(state)
+    }
+
+    case 'blackout': {
+      return { ...state, panic: panicMode(state) === 'blackout' ? 'none' : 'blackout' }
+    }
+
+    case 'freeze': {
+      return { ...state, panic: panicMode(state) === 'freeze' ? 'none' : 'freeze' }
     }
 
     case 'tick': {
