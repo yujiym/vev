@@ -18,7 +18,7 @@ const showMemorySchema = v.object({
   blackout: v.boolean(),
   bpm: v.pipe(v.number(), v.finite(), v.minValue(1)),
   clipId: v.pipe(v.string(), v.minLength(1)),
-  downbeatAt: v.number(),
+  downbeatAt: v.pipe(v.number(), v.finite()),
 })
 
 export type ShowMemory = v.InferOutput<typeof showMemorySchema>

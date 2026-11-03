@@ -17,6 +17,9 @@ const fakeStorage = (initial: string | null = null) => {
   return { storage, writes }
 }
 
+const stored = (downbeatAt: string, bpm = '120') =>
+  `{"beatsPerBar":4,"blackout":false,"bpm":${bpm},"clipId":"loud","downbeatAt":${downbeatAt}}`
+
 const MEMORY = { beatsPerBar: 4, blackout: true, bpm: 128, clipId: 'loud', downbeatAt: 1000 }
 
 describe('the show memory', () => {
@@ -44,6 +47,15 @@ describe('the show memory', () => {
     const errors = vi.spyOn(console, 'error').mockReturnValue()
     expect(readShowMemory(fakeStorage('{not json').storage)).toBeUndefined()
     expect(readShowMemory(fakeStorage('{"bpm":"fast"}').storage)).toBeUndefined()
+    errors.mockRestore()
+  })
+
+  it('treats a stored value that is not finite as no memory, so the bar grid cannot become NaN', () => {
+    const errors = vi.spyOn(console, 'error').mockReturnValue()
+    // `1e400` is valid JSON that `JSON.parse` reads as Infinity.
+    expect(readShowMemory(fakeStorage(stored('1e400')).storage)).toBeUndefined()
+    expect(readShowMemory(fakeStorage(stored('-1e400')).storage)).toBeUndefined()
+    expect(readShowMemory(fakeStorage(stored('1000', '1e400')).storage)).toBeUndefined()
     errors.mockRestore()
   })
 
