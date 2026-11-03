@@ -37,7 +37,7 @@ import { TAG_THRESHOLD, TAG_VOCABULARY } from './tags.ts'
  *    option description is invisible to any test that only checks the answer.
  */
 
-const JEV_MODEL = 'typesafe/jev'
+const JEV_MODEL = 'typesafe/jev-1.14.0'
 
 /** 3.2 over jev's zero-based levels 0-4 rounds to level 3, which is `energy` 4. */
 const CANNED_ENERGY_SCORE = 3.2
@@ -126,8 +126,6 @@ interface FakeOptions {
   readonly jevResponse?: unknown
   /** Makes every jev call throw, the way a gateway refusal does. */
   readonly jevThrows?: boolean
-  /** Extra top-level keys alongside the answers, as a real envelope is likely to carry. */
-  readonly envelopeSiblings?: { readonly model: string; readonly usage: { readonly neurons: number } }
   /** Replaces ONE answer, by question id — how a malformed or out-of-range answer is injected. */
   readonly override?: { readonly answer: unknown; readonly id: string }
 }
@@ -194,7 +192,8 @@ const createFakeAi = (options: FakeOptions = {}): FakeAi => {
         )
         const { override } = options
         const answered = override === undefined ? answers : { ...answers, [override.id]: override.answer }
-        return { ...answered, ...options.envelopeSiblings }
+        // The envelope observed from the live model: answers under `answers`, `model` and `usage` beside them.
+        return { answers: answered, model: 'jev-1.14.0', usage: { input_tokens: 1162, output_tokens: 69 } }
       }
 
       if (options.descriptionThrows === true) {
@@ -460,11 +459,19 @@ describe('annotateClip — what it refuses', () => {
     }
   })
 
-  it('ignores sibling keys in the envelope, which a real response is likely to carry', async () => {
-    const ai = createFakeAi({ envelopeSiblings: { model: 'typesafe/jev', usage: { neurons: 0.42 } } })
+  it('reads answers from the observed envelope and ignores its model and usage siblings', async () => {
+    const ai = createFakeAi()
     const result = await annotateClip(ai, CLIP)
     expect(result.ok && result.annotation.energy).toBe(EXPECTED_ENERGY)
     expect(jevCalls(ai)).toHaveLength(1)
+  })
+
+  it('refuses answers sitting at the top level instead of under `answers`', async () => {
+    const answered = {
+      density: { choice: 'sparse', confidence: 0.9, type: 'choice' },
+    }
+    const { jevAttempts, ok } = await refusalOf({ jevResponse: answered })
+    expect({ jevAttempts, ok }).toStrictEqual(RETRY_THEN_FAIL)
   })
 
   it('never asks the description model when the typed questions failed', async () => {
@@ -678,7 +685,7 @@ describe(enqueueAnnotation, () => {
  */
 const runnerReturning = (answers: unknown): AiRunner => ({
   // oxlint-disable-next-line eslint/require-await -- async is forced by typescript/promise-function-async; a canned answer has nothing to await
-  run: async () => answers,
+  run: async () => ({ answers, model: 'jev-1.14.0', usage: { input_tokens: 1, output_tokens: 1 } }),
 })
 
 const TEMPO_OPTIONS = { andante: 'moderate', largo: 'slow', presto: 'quick' }
@@ -725,7 +732,7 @@ describe(askJev, () => {
       // oxlint-disable-next-line eslint/require-await -- as above
       run: async (_model: string, inputs: unknown) => {
         seen.push(inputs)
-        return { wet: { noul: 0.3, type: 'noul' } }
+        return { answers: { wet: { noul: 0.3, type: 'noul' } } }
       },
     }
     await askJev(ai, 'a clip', { wet: noulQuestion('It is wet.', 'water', 'no water') })
@@ -737,6 +744,52 @@ describe(askJev, () => {
         state: 'a clip',
       },
     ])
+  })
+})
+
+describe('askJev with images', () => {
+  it('sends each image as a base64 asset that the state names by key', async () => {
+    const seen: unknown[] = []
+    const ai: AiRunner = {
+      // oxlint-disable-next-line eslint/require-await -- as above
+      run: async (_model: string, inputs: unknown) => {
+        seen.push(inputs)
+        return { answers: { wet: { noul: 0.3, type: 'noul' } } }
+      },
+    }
+    // 0xff 0xd8 0xff is a JPEG's first three bytes; base64 of those plus 0x00 is "/9j/AA==".
+    const jpeg = { bytes: new Uint8Array([0xff, 0xd8, 0xff, 0x00]), format: 'jpeg' as const }
+    const png = { bytes: new Uint8Array([0x89, 0x50, 0x4e, 0x47]), format: 'png' as const }
+    await askJev(ai, 'a clip', { wet: noulQuestion('It is wet.', 'water', 'no water') }, [jpeg, png])
+    expect(seen).toStrictEqual([
+      {
+        assets: {
+          'still-0': { data_base64: '/9j/AA==', format: 'jpeg', type: 'image' },
+          'still-1': { data_base64: 'iVBORw==', format: 'png', type: 'image' },
+        },
+        questions: {
+          wet: { criteria: { false: 'no water', true: 'water' }, instructions: 'It is wet.', type: 'noul' },
+        },
+        state: { brief: 'a clip', stills: ['still-0', 'still-1'] },
+      },
+    ])
+  })
+
+  it('encodes an image larger than one base64 slice without corrupting it', async () => {
+    const seen: { assets: Record<string, { data_base64: string }> }[] = []
+    const ai: AiRunner = {
+      // oxlint-disable-next-line eslint/require-await -- as above
+      run: async (_model: string, inputs: unknown) => {
+        seen.push(inputs as (typeof seen)[number])
+        return { answers: { wet: { noul: 0.3, type: 'noul' } } }
+      },
+    }
+    const bytes = Uint8Array.from({ length: 100_000 }, (_, index) => index % 251)
+    await askJev(ai, 'a clip', { wet: noulQuestion('It is wet.', 'water', 'no water') }, [
+      { bytes, format: 'jpeg' },
+    ])
+    const encoded = seen[0]?.assets['still-0']?.data_base64 ?? ''
+    expect(Uint8Array.from(atob(encoded), (char) => char.codePointAt(0) ?? 0)).toStrictEqual(bytes)
   })
 })
 
