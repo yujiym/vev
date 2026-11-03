@@ -21,6 +21,10 @@ const vars = (mode: 'cloud' | 'local') => ({
   VEV_MODE: mode,
 })
 
+// Void checks a new version before moving traffic to it. With Version URLs closed, this binding is
+// the only way it can do that, and it refuses to activate without one.
+const versionMetadata = { binding: 'CF_VERSION_METADATA' }
+
 export const targets = {
   // Workers AI has no local implementation, and a venue has no network (§15.3).
   local: {
@@ -40,6 +44,7 @@ export const targets = {
     r2_buckets: [{ binding: 'MEDIA', bucket_name: 'vev-media-preview' }],
     routes: [{ custom_domain: true, pattern: 'vev-preview.0x7.sh' }],
     vars: vars('cloud'),
+    version_metadata: versionMetadata,
     workers_dev: false,
   },
   // No route yet (M12), so this Worker is unreachable until one is attached. Closing both paths now
@@ -52,6 +57,7 @@ export const targets = {
     preview_urls: false,
     r2_buckets: [{ binding: 'MEDIA', bucket_name: 'vev-media' }],
     vars: vars('cloud'),
+    version_metadata: versionMetadata,
     workers_dev: false,
   },
 }
