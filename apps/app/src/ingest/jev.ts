@@ -283,8 +283,8 @@ export const askJev = async (
   const envelope = v.safeParse(envelopeSchema, raw)
   if (!envelope.success) {
     // The keys and no content, since a response can echo the request.
-    const shape = v.safeParse(v.record(v.string(), v.unknown()), raw)
-    const keys = shape.success ? Object.keys(shape.output).join(', ') : 'not an object'
+    const unread = v.safeParse(v.record(v.string(), v.unknown()), raw)
+    const keys = unread.success ? Object.keys(unread.output).join(', ') : 'not an object'
     throw new Error(`jev: response had no \`answers\` object keyed by question id (keys: ${keys})`)
   }
 
