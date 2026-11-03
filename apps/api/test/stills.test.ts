@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import { createExecutionContext, env, SELF, waitOnExecutionContext } from 'cloudflare:test'
 import * as v from 'valibot'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import worker from '../src/index.ts'
 
@@ -55,7 +55,9 @@ describe('POST /api/clips/:id/stills', () => {
     const response = await uploadStills(clipId, stillsBody([jpegBytes(1), jpegBytes(2), jpegBytes(3)]))
     expect(response.status).toBe(201)
 
-    const keys = [0, 1, 2].map((index) => `stills/${clipId}/${index}.jpg`)
+    const keys = v.parse(v.object({ stillKeys: v.array(v.string()) }), await response.json()).stillKeys
+    expect(keys).toHaveLength(3)
+    expect(keys.every((key) => key.startsWith(`stills/${clipId}/`) && key.endsWith('.jpg'))).toBe(true)
     await expect(storedKeys(clipId)).resolves.toStrictEqual(keys)
     const stored = await Promise.all(
       keys.map(async (key) => {
@@ -74,7 +76,8 @@ describe('POST /api/clips/:id/stills', () => {
   it('does not serve stills from the public media route', async () => {
     const clipId = await registerClip()
     await uploadStills(clipId, stillsBody([jpegBytes(1)]))
-    const response = await SELF.fetch(`https://vev.test/media/stills/${clipId}/0.jpg`)
+    const [key] = (await storedKeys(clipId)) ?? []
+    const response = await SELF.fetch(`https://vev.test/media/${key}`)
     expect(response.status).toBe(404)
   })
 
@@ -86,14 +89,95 @@ describe('POST /api/clips/:id/stills', () => {
     expect(Object.keys(await response.json())).not.toContain('stillKeys')
   })
 
-  it('deletes stills a shorter re-upload no longer references', async () => {
+  it('replaces a set with fresh keys and deletes every object of the old one', async () => {
     const clipId = await registerClip()
     await uploadStills(clipId, stillsBody([jpegBytes(1), jpegBytes(2), jpegBytes(3)]))
-    await uploadStills(clipId, stillsBody([jpegBytes(4)]))
+    const first = (await storedKeys(clipId)) ?? []
 
-    await expect(storedKeys(clipId)).resolves.toStrictEqual([`stills/${clipId}/0.jpg`])
-    await expect(env.MEDIA.get(`stills/${clipId}/1.jpg`)).resolves.toBeNull()
-    await expect(env.MEDIA.get(`stills/${clipId}/2.jpg`)).resolves.toBeNull()
+    const response = await uploadStills(clipId, stillsBody([jpegBytes(4)]))
+    expect(response.status).toBe(201)
+
+    const second = (await storedKeys(clipId)) ?? []
+    expect(second).toHaveLength(1)
+    expect(first.some((key) => second.includes(key))).toBe(false)
+    const listed = await env.MEDIA.list({ prefix: `stills/${clipId}/` })
+    expect(listed.objects.map((object) => object.key)).toStrictEqual(second)
+  })
+
+  it('leaves the existing set whole when a replacement fails part-way', async () => {
+    const clipId = await registerClip()
+    await uploadStills(clipId, stillsBody([jpegBytes(1), jpegBytes(2), jpegBytes(3)]))
+    const first = (await storedKeys(clipId)) ?? []
+
+    let puts = 0
+    const failing = {
+      delete: async (keys: string | string[]) => {
+        await env.MEDIA.delete(keys)
+      },
+      get: async (key: string) => await env.MEDIA.get(key),
+      list: async (options?: R2ListOptions) => await env.MEDIA.list(options),
+      put: async (key: string, value: ArrayBuffer, options?: R2PutOptions) => {
+        puts += 1
+        if (puts === 2) {
+          throw new Error('R2 unavailable')
+        }
+        return await env.MEDIA.put(key, value, options)
+      },
+    } as unknown as R2Bucket
+    const consoleError = vi.spyOn(console, 'error').mockReturnValue()
+    const ctx = createExecutionContext()
+    const response = await worker.fetch(
+      new Request(`https://vev.test/api/clips/${clipId}/stills`, {
+        body: stillsBody([jpegBytes(7), jpegBytes(8), jpegBytes(9)]),
+        headers: ACCESS_HEADERS,
+        method: 'POST',
+      }),
+      { ...env, MEDIA: failing },
+      ctx,
+    )
+    await waitOnExecutionContext(ctx)
+    consoleError.mockRestore()
+
+    expect(response.status).toBeGreaterThanOrEqual(500)
+    await expect(storedKeys(clipId)).resolves.toStrictEqual(first)
+    const bytes = await Promise.all(
+      first.map(async (key) => {
+        const object = await env.MEDIA.get(key)
+        return [...new Uint8Array((await object?.arrayBuffer()) ?? [])]
+      }),
+    )
+    expect(bytes).toStrictEqual([1, 2, 3].map((tail) => [...jpegBytes(tail)]))
+    const listed = await env.MEDIA.list({ prefix: `stills/${clipId}/` })
+    expect(listed.objects.map((object) => object.key).toSorted()).toStrictEqual([...first].toSorted())
+  })
+
+  it('still answers 201 when deleting the old objects fails, because the new set is already recorded', async () => {
+    const clipId = await registerClip()
+    await uploadStills(clipId, stillsBody([jpegBytes(1), jpegBytes(2)]))
+
+    const brokenDelete = {
+      delete: async () => await Promise.reject(new Error('R2 unavailable')),
+      get: async (key: string) => await env.MEDIA.get(key),
+      list: async (options?: R2ListOptions) => await env.MEDIA.list(options),
+      put: async (key: string, value: ArrayBuffer, options?: R2PutOptions) =>
+        await env.MEDIA.put(key, value, options),
+    } as unknown as R2Bucket
+    const consoleError = vi.spyOn(console, 'error').mockReturnValue()
+    const ctx = createExecutionContext()
+    const response = await worker.fetch(
+      new Request(`https://vev.test/api/clips/${clipId}/stills`, {
+        body: stillsBody([jpegBytes(5)]),
+        headers: ACCESS_HEADERS,
+        method: 'POST',
+      }),
+      { ...env, MEDIA: brokenDelete },
+      ctx,
+    )
+    await waitOnExecutionContext(ctx)
+    consoleError.mockRestore()
+
+    expect(response.status).toBe(201)
+    await expect(storedKeys(clipId)).resolves.toHaveLength(1)
   })
 
   it('404s for a clip id with no matching row', async () => {
@@ -127,7 +211,7 @@ describe('POST /api/clips/:id/stills', () => {
     const response = await uploadStills(clipId, stillsBody([jpegBytes(1), png]))
     expect(response.status).toBe(400)
     await expect(storedKeys(clipId)).resolves.toBeNull()
-    await expect(env.MEDIA.get(`stills/${clipId}/0.jpg`)).resolves.toBeNull()
+    await expect(env.MEDIA.list({ prefix: `stills/${clipId}/` })).resolves.toMatchObject({ objects: [] })
   })
 
   it('rejects a request that is not multipart', async () => {
@@ -175,6 +259,6 @@ describe('POST /api/clips/:id/stills', () => {
     )
     await waitOnExecutionContext(ctx)
     expect(response.status).toBe(201)
-    await expect(storedKeys(clipId)).resolves.toStrictEqual([`stills/${clipId}/0.jpg`])
+    await expect(storedKeys(clipId)).resolves.toHaveLength(1)
   })
 })
