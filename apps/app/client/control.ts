@@ -289,6 +289,8 @@ interface TrackRun {
   pending: 'beyond' | 'none' | 'step'
   /** The step staged as `next`; equal to `index` when nothing is staged. */
   queued: number
+  /** A step whose clip would not load. Trying it again next frame would only fail again, sixty times a second. */
+  refusedStep: number | undefined
   startedAt: number | undefined
   track: LoadedTrack
 }
@@ -585,8 +587,8 @@ export const createControl = (picture: Picture, options: CreateControlOptions = 
 
     const next = run.index + 1
     const step = run.track.steps[next]
-    if (step === undefined) {
-      // The track has run out. What is on screen keeps playing — §0: never stop the show.
+    if (step === undefined || run.refusedStep === next) {
+      // The track has run out, or cannot go on. What is on screen keeps playing — §0: never stop the show.
       return
     }
 
@@ -595,6 +597,8 @@ export const createControl = (picture: Picture, options: CreateControlOptions = 
     if (state.next?.clipId === step.clipId) {
       run.queued = next
       run.pending = 'step'
+    } else if (!state.fading) {
+      run.refusedStep = next
     }
   }
 
@@ -643,6 +647,7 @@ export const createControl = (picture: Picture, options: CreateControlOptions = 
       index: -1,
       pending: 'none',
       queued: -1,
+      refusedStep: undefined,
       startedAt: undefined,
       track,
     }

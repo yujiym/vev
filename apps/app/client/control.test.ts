@@ -488,6 +488,41 @@ describe('the picture obeys the reducer', () => {
     errors.mockRestore()
   })
 
+  it('a track step that will not compile is tried once, and the show keeps playing where it is', () => {
+    const clockNow = createFakeNow(0)
+    const errors = vi.spyOn(console, 'error').mockReturnValue()
+    const { picture } = fakePicture()
+    let attempts = 0
+    const control = createControl(
+      {
+        ...picture,
+        load: (slot, code) => {
+          if (code === 'broken()') {
+            attempts += 1
+            throw new SyntaxError('nope')
+          }
+          picture.load(slot, code)
+        },
+      },
+      { clips: FIXTURES, now: clockNow.now, startClipId: 'quiet' },
+    )
+
+    control.loadTrack({
+      clips: [{ code: 'broken()', id: 'broken', title: 'Broken' }],
+      id: 'track',
+      steps: [{ bars: 4, clipId: 'broken', transition: CUT_SPEC }],
+      title: 'Set',
+    })
+    for (let frame = 0; frame < 5; frame += 1) {
+      control.tick()
+    }
+
+    expect(attempts).toBe(1)
+    expect(control.getSnapshot()).toMatchObject({ current: { clipId: 'quiet' }, next: undefined })
+    expect(control.getSnapshot().pictureFault).toContain('Broken did not load')
+    errors.mockRestore()
+  })
+
   it('a frame that throws does not stop the reducer, and is reported once', () => {
     const clockNow = createFakeNow(0)
     const errors = vi.spyOn(console, 'error').mockReturnValue()
