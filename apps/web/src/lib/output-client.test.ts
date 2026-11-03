@@ -497,15 +497,55 @@ describe('panic on the output', () => {
       expect(compositor.mount).toHaveBeenCalledWith(canvas)
     })
 
+    channel.receive({ at: 1000, kind: 'switch', to: 'a', transition: { bars: 0, kind: 'cut' } })
+    scheduler.fire()
+    expect(compositor.tickCalls()).toStrictEqual([1000])
+
     channel.receive({ kind: 'panic', mode: 'freeze' })
     scheduler.fire()
-    expect(compositor.tickCalls()).toStrictEqual([])
+    expect(compositor.tickCalls()).toStrictEqual([1000])
     expect(onPanic).toHaveBeenLastCalledWith('freeze')
 
     channel.receive({ kind: 'panic', mode: 'none' })
     scheduler.fire()
-    expect(compositor.tickCalls()).toStrictEqual([1000])
+    expect(compositor.tickCalls()).toStrictEqual([1000, 1000])
     expect(onPanic).toHaveBeenLastCalledWith('none')
+  })
+
+  it('draws the restored picture once when the window reloads frozen, then holds it', async () => {
+    const channel = new FakeChannel()
+    const compositor = createFakeCompositor()
+    const scheduler = createFrameScheduler()
+    const canvas = fakeCanvas()
+    const cut: TransitionSpec = { bars: 0, kind: 'cut' }
+
+    startOutput({
+      cancelFrame: scheduler.cancelFrame,
+      canvas,
+      channel: channel as unknown as BroadcastChannel,
+      createCompositor: () => compositor,
+      now: () => 1000,
+      requestFrame: scheduler.requestFrame,
+      subscribeResize: noResize,
+      viewportSize: fixedViewport,
+    })
+    await vi.waitFor(() => {
+      expect(compositor.mount).toHaveBeenCalledWith(canvas)
+    })
+
+    channel.receive({ clip: { code: 'osc().out()', id: 'held' }, kind: 'load', slot: 'a' })
+    channel.receive({ kind: 'panic', mode: 'freeze' })
+    channel.receive({ at: 1000, kind: 'switch', to: 'a', transition: cut })
+    scheduler.fire()
+    scheduler.fire()
+
+    expect(compositor.switchTo).toHaveBeenCalledExactlyOnceWith('a', cut, 1000)
+    expect(compositor.tickCalls()).toStrictEqual([1000])
+
+    channel.receive({ at: 1000, kind: 'switch', to: 'b', transition: cut })
+    scheduler.fire()
+    expect(compositor.switchTo).toHaveBeenCalledOnce()
+    expect(compositor.tickCalls()).toStrictEqual([1000])
   })
 
   it('blackout keeps rendering underneath, because the picture must be current when it is lifted', async () => {

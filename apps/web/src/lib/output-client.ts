@@ -231,6 +231,10 @@ export const startOutput = (options: StartOutputOptions): (() => void) => {
   let pendingSwitch: SwitchMessage | undefined
   /** Panic is a pause of the picture, not of the show: the control window keeps running. */
   let panic: PanicMode = 'none'
+  /** A switch has reached the compositor, so it holds a clip rather than its blank start. */
+  let switched = false
+  /** A frame has been drawn since the first switch reached the compositor. */
+  let painted = false
   let stopped = false
   let disposed = false
   let frame: number | undefined
@@ -248,6 +252,7 @@ export const startOutput = (options: StartOutputOptions): (() => void) => {
   const flushDueSwitch = (): void => {
     if (pendingSwitch && now() >= pendingSwitch.at) {
       compositor?.switchTo(pendingSwitch.to, pendingSwitch.transition, pendingSwitch.at)
+      switched = true
       pendingSwitch = undefined
     }
   }
@@ -284,9 +289,14 @@ export const startOutput = (options: StartOutputOptions): (() => void) => {
     // Freeze holds the last frame by not rendering one; blackout still renders, because the
     // picture underneath must be current the instant the performer lifts it. A held switch is
     // not flushed while frozen either — it would complete invisibly behind the freeze.
-    if (panic !== 'freeze') {
+    //
+    // The exception is a window that has not drawn anything yet. One that reloads (or opens) while
+    // the control is frozen is told to freeze before it is told what to show, so holding "the last
+    // frame" would hold a blank canvas until the freeze is lifted.
+    if (panic !== 'freeze' || !painted) {
       flushDueSwitch()
       compositor?.tick(now())
+      painted = switched
     }
     frame = requestFrame(loop)
   }
