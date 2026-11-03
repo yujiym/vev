@@ -11,6 +11,10 @@ describe('deploy targets', () => {
     expect(targets[name]).toMatchObject({ preview_urls: false, workers_dev: false })
   })
 
+  it.each(['preview', 'production'] as const)('%s keeps its logs', (name) => {
+    expect(targets[name].observability).toStrictEqual({ enabled: true })
+  })
+
   // With Version URLs closed, Void has no other way to check a version before activating it.
   it.each(['preview', 'production'] as const)('%s can pass the readiness check', (name) => {
     expect(targets[name].version_metadata).toBeDefined()
