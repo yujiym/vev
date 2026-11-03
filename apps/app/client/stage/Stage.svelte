@@ -144,7 +144,7 @@
     <div class="blackout"></div>
   {/if}
 
-  <div bind:clientHeight={rowHeight}>
+  <div bind:clientHeight={rowHeight} class="row-holder">
     <ControlRow
       {cardsShown}
       {control}
@@ -243,6 +243,16 @@
     overflow: hidden;
     position: absolute;
     width: 1px;
+  }
+
+  /* The row wraps on a narrow screen, and the overlays and panels start below it. */
+  .row-holder {
+    left: 0;
+    pointer-events: none;
+    position: fixed;
+    right: 0;
+    top: 0;
+    z-index: 30;
   }
 
   .notices {

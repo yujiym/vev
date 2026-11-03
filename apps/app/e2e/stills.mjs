@@ -1,12 +1,23 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Drives /studio/clips/new through probe, recording and save, and checks the stills that leave the
+// Drives the New clip panel on the stage through probe, recording and save, and checks the stills that leave the
 // browser: how many, that they are JPEGs inside TypeSafe's size limits, that they are not black,
 // and that registration still saves. The capture path (a `drawImage` copy inside the render tick)
 // needs a real WebGL canvas, so no unit test can reach it. See ./README.md to run it.
 import fs from 'node:fs'
 import path from 'node:path'
 
-import { BASE, check, done, openBrowser, SHOTS, shot, until } from './lib.mjs'
+import {
+  check,
+  done,
+  openBrowser,
+  openPanel,
+  openStage,
+  panel,
+  seedClips,
+  SHOTS,
+  shot,
+  until,
+} from './lib.mjs'
 
 const CODE = 'osc(18, 0.1, 1.4).color(0.9, 0.4, 0.2).kaleid(5).out()'
 
@@ -53,24 +64,29 @@ await page.addInitScript(() => {
   }
 })
 
-await page.goto(`${BASE}/studio/clips/new`, { waitUntil: 'networkidle' })
-await page.locator('textarea').fill(CODE)
-await page.getByRole('button', { name: 'Run probe' }).click()
+await seedClips()
+await openStage(page)
+await openPanel(page, 'New clip')
+await panel(page).locator('textarea').fill(CODE)
+await panel(page).getByRole('button', { name: 'Run probe' }).click()
 const probed = await until(page, () => document.body.innerText.includes('Probe passed'))
 check('the probe passes', probed)
 
-await page.getByRole('button', { name: 'Record thumbnail' }).click()
+await panel(page).getByRole('button', { name: 'Record thumbnail' }).click()
 const recorded = await until(page, () => document.body.innerText.includes('Annotation frames:'), {
   timeout: 20_000,
 })
 check('the recording finishes', recorded)
-const frames = Number.parseInt((await page.locator('text=Annotation frames:').innerText()).split(':')[1], 10)
+const frames = Number.parseInt(
+  (await panel(page).locator('text=Annotation frames:').innerText()).split(':')[1],
+  10,
+)
 check('three annotation frames were captured', frames === 3, `got ${frames}`)
 
-await page.getByRole('textbox', { name: 'Title' }).fill('e2e stills')
-await page.getByRole('textbox', { name: 'Author' }).fill('e2e')
-await page.getByRole('textbox', { name: 'Licence' }).fill('CC BY 4.0')
-await page.getByRole('button', { name: 'Save clip' }).click()
+await panel(page).getByRole('textbox', { name: 'Title' }).fill('e2e stills')
+await panel(page).getByRole('textbox', { name: 'Author' }).fill('e2e')
+await panel(page).getByRole('textbox', { name: 'Licence' }).fill('CC BY 4.0')
+await panel(page).getByRole('button', { name: 'Save clip' }).click()
 const saved = await until(page, () => document.body.innerText.includes('Saved as'))
 check('the clip saves', saved)
 

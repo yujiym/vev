@@ -12,6 +12,8 @@ import fs from 'node:fs'
 import { createRequire } from 'node:module'
 import path from 'node:path'
 
+import { BASE } from './seed.mjs'
+
 export { BASE, seedClips, seedTrack } from './seed.mjs'
 
 /** Where captures land. Git-ignored: they are evidence for the person running this, not artefacts. */
@@ -40,9 +42,6 @@ export const done = async (browser) => {
  * frame rate, and nothing about how any of this behaves on a real projector. §15.2's performance
  * questions are untouched by everything in this directory.
  *
- * An explicit context, not `browser.newPage()`, so the playback driver can open the output window
- * as a second page sharing this origin — and therefore sharing the BroadcastChannel the control
- * panel publishes on. That two-window arrangement is the real one, not a simulation of it.
  */
 /**
  * Finds playwright without it being a dependency here.
@@ -126,6 +125,39 @@ export const until = async (page, predicate, { arg, timeout = 15_000 } = {}) => 
     return false
   }
 }
+
+/** Opens the stage at `/`. A reload asks first (ADR 0012), and these drivers mean it when they reload. */
+export const openStage = async (page) => {
+  page.on('dialog', async (dialog) => {
+    await dialog.accept()
+  })
+  await page.goto(`${BASE}/`, { waitUntil: 'networkidle' })
+  await page.locator('.row').waitFor({ timeout: 15_000 })
+}
+
+export const rowButton = (page, name) => page.locator('.row').getByRole('button', { exact: true, name })
+
+/** The panel on screen. Forms stay mounted but hidden once opened, so "visible" is part of the question. */
+export const panel = (page) => page.locator('aside:visible')
+
+/** Clicks a control-row toggle, and waits for what it opens when that is a panel. */
+export const openPanel = async (page, name) => {
+  await rowButton(page, name).click()
+  await panel(page).waitFor({ timeout: 10_000 })
+}
+
+/** Turns the Now overlay on, which is how a driver reads what is playing. */
+export const showNow = async (page) => {
+  await rowButton(page, 'Now').click()
+  await page.locator('.now-title').waitFor({ timeout: 10_000 })
+}
+
+export const nowTitle = async (page) => flat((await page.locator('.now-title').textContent()) ?? '')
+export const nextTitle = async (page) => flat((await page.locator('.next-title').textContent()) ?? '')
+
+/** A patch of picture no overlay covers: the row is along the top, the cards along the bottom. */
+export const pictureFrame = async (page) =>
+  (await page.screenshot({ clip: { height: 200, width: 200, x: 300, y: 300 } })).toString('base64')
 
 export const shot = async (target, name) => await target.screenshot({ path: path.join(SHOTS, `${name}.png`) })
 

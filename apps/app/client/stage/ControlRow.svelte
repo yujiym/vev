@@ -153,13 +153,8 @@
     display: flex;
     flex-wrap: wrap;
     gap: 0.25rem 0.6rem;
-    left: 0;
     padding: 0.3rem 0.4rem;
     pointer-events: none;
-    position: fixed;
-    right: 0;
-    top: 0;
-    z-index: 30;
   }
 
   .group {

@@ -12,7 +12,7 @@ export const BASE = 'http://127.0.0.1:8787'
 
 const APP_DIR = path.join(import.meta.dirname, '..')
 
-/** The five clips the library driver reads flags off, plus the two the playback driver crossfades between. */
+/** The clips the library driver reads flags off, the two the playback driver crossfades between, and the stage driver's own. */
 const CLIPS = [
   {
     // Deliberately dark, slow and sparse: the outgoing half of a crossfade a still frame can show.
@@ -41,6 +41,10 @@ const CLIPS = [
     license: 'CC0 1.0',
     title: 'e2e textmode only',
   },
+  // The two extremes an overlay has to stay readable over, and the clip a thumbnail is recorded for.
+  { code: 'solid(1, 1, 1).out()', engine: 'hydra', license: 'CC0 1.0', title: 'e2e white' },
+  { code: 'solid(0, 0, 0).out()', engine: 'hydra', license: 'CC0 1.0', title: 'e2e black' },
+  { code: 'osc(10, 0.2, 1).out()', engine: 'hydra', license: 'CC0 1.0', title: 'e2e with thumbnail' },
 ]
 
 const json = async (url, init) => {
@@ -103,8 +107,8 @@ export const seedClips = async () => {
 
 /**
  * Creates a fresh track for one run, so no driver ever depends on a track an earlier run left
- * behind. Item 1 is the bright clip and item 2 the dark one, so the first crossfade of a run goes
- * from the panel's dark start fixture into something visibly different.
+ * behind. Item 1 is the bright clip and item 2 the dark one, so the crossfade between them is visibly
+ * a blend.
  *
  * There is no DELETE route for tracks, so each run leaves one behind in the local database. That
  * is deliberate — a local dev D1 is scratch — but it is why the title carries a timestamp.
