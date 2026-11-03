@@ -4,10 +4,17 @@ import { defineMiddleware } from 'void'
 import { server } from '../src/index.ts'
 
 const SERVER_PATH = /^\/(?:api|media)\//u
+const TRAILING_SLASH = /(?<=.)\/+$/u
 
 export default defineMiddleware(async (c, next) => {
-  if (SERVER_PATH.test(new URL(c.req.url).pathname)) {
+  const url = new URL(c.req.url)
+  if (SERVER_PATH.test(url.pathname)) {
     return await server.fetch(c.req.raw, c.env, c.executionCtx)
+  }
+  // Pages match without the slash, and the catch-all would otherwise turn `/output/` into "Not found".
+  if (TRAILING_SLASH.test(url.pathname)) {
+    url.pathname = url.pathname.replace(TRAILING_SLASH, '')
+    return c.redirect(url.toString(), 308)
   }
   await next()
 })

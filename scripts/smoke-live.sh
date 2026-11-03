@@ -73,6 +73,11 @@ client_script="$(echo "$deep_body" | grep -o 'src="/assets/pages-client-[^"]*\.j
 curl -sf -o /dev/null "$origin$client_script" || fail "the client script $client_script the shell references does not load"
 echo "shell loads $client_script"
 
+echo "== a trailing slash redirects to the page, not to the catch-all =="
+slash="$(curl -s -o /dev/null -w '%{http_code} %{redirect_url}' "$origin/output/?x=1")"
+[ "$slash" = "308 $origin/output?x=1" ] || fail "expected /output/ to redirect to /output, got: $slash"
+echo "$slash"
+
 echo "== a missing file is a 404, not the app shell =="
 file_404_code="$(curl -s -o /dev/null -w '%{http_code}' "$origin/assets/this-file-does-not-exist.js")"
 [ "$file_404_code" = "404" ] || fail "expected 404 for a missing asset, got $file_404_code"
