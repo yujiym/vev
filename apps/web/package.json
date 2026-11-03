@@ -12,6 +12,7 @@
     "test": "vp test"
   },
   "dependencies": {
+    "@vev/decision": "workspace:*",
     "@vev/engines": "workspace:*",
     "@vev/ingest": "workspace:*",
     "@vev/shared": "workspace:*",

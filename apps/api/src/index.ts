@@ -8,6 +8,7 @@ import * as v from 'valibot'
 import { requireAccessAssertion } from './access.ts'
 import { settingsTable } from './db/schema.ts'
 import type { Env } from './env.ts'
+import { candidatesRoutes } from './routes/candidates.ts'
 import { clipsRoutes } from './routes/clips.ts'
 import { clipThumbnailRoutes, mediaRoutes } from './routes/media.ts'
 import { tracksRoutes } from './routes/tracks.ts'
@@ -39,6 +40,7 @@ const routes = api.get('/health', async (c) => {
 // `requireAccessAssertion` mounted above (see that middleware's doc comment on
 // why coverage is by explicit skip set rather than by registration order).
 const withLibrary = routes
+  .route('/candidates', candidatesRoutes)
   .route('/clips', clipsRoutes)
   .route('/clips', clipThumbnailRoutes)
   .route('/tracks', tracksRoutes)

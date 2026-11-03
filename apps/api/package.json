@@ -16,6 +16,7 @@
   },
   "dependencies": {
     "@hono/valibot-validator": "^0.6.1",
+    "@vev/decision": "workspace:*",
     "@vev/engines": "workspace:*",
     "@vev/ingest": "workspace:*",
     "@vev/shared": "workspace:*",
