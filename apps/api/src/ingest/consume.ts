@@ -5,7 +5,8 @@ import * as v from 'valibot'
 
 import { clipsTable } from '../db/clips.ts'
 import type { Env } from '../env.ts'
-import { annotateClip } from './annotate.ts'
+import { annotateClip, withTimeout } from './annotate.ts'
+import type { JevImage } from './jev.ts'
 
 /**
  * The annotation queue: what registration puts on it, and what the consumer does with it.
@@ -50,6 +51,36 @@ const markFailed = async (env: Env, clipId: string): Promise<void> => {
     .where(eq(clipsTable.id, clipId))
 }
 
+/** Reading a few small objects from R2 is quick; this bounds the case where it is not. */
+const STILLS_LOAD_TIMEOUT_MS = 10_000
+
+/**
+ * The clip's stills, in recording order. Best effort by contract, like the stills upload that made
+ * them: a missing object or an R2 failure drops that frame, and none left means the clip is
+ * annotated from its code alone — which is also what a clip registered without stills gets.
+ */
+const loadStills = async (env: Env, clipId: string, keys: readonly string[]): Promise<JevImage[]> => {
+  if (keys.length === 0) {
+    return []
+  }
+  try {
+    const objects = await withTimeout(
+      Promise.all(
+        keys.map(async (key) => {
+          const object = await env.MEDIA.get(key)
+          return object === null ? null : new Uint8Array(await object.arrayBuffer())
+        }),
+      ),
+      STILLS_LOAD_TIMEOUT_MS,
+      'loading stills',
+    )
+    return objects.flatMap((bytes) => (bytes === null ? [] : [{ bytes, format: 'jpeg' as const }]))
+  } catch (error) {
+    console.error(`ingest: clip ${clipId} stills could not be loaded, annotating from code alone`, error)
+    return []
+  }
+}
+
 const annotateOne = async (env: Env, clipId: string): Promise<void> => {
   const db = drizzle(env.DB)
   const [row] = await db
@@ -59,6 +90,7 @@ const annotateOne = async (env: Env, clipId: string): Promise<void> => {
       // asked of a model (see `derivedTags`, `tags.ts`).
       deps: clipsTable.deps,
       engine: clipsTable.engine,
+      stillKeys: clipsTable.stillKeys,
       title: clipsTable.title,
     })
     .from(clipsTable)
@@ -76,7 +108,8 @@ const annotateOne = async (env: Env, clipId: string): Promise<void> => {
     return
   }
 
-  const result = await annotateClip(env.AI, row)
+  const stills = await loadStills(env, clipId, row.stillKeys ?? [])
+  const result = await annotateClip(env.AI, { ...row, stills })
   if (!result.ok) {
     console.error(`ingest: clip ${clipId} annotation failed — ${result.reason}`)
     await markFailed(env, clipId)
@@ -92,6 +125,8 @@ const annotateOne = async (env: Env, clipId: string): Promise<void> => {
     confidence: result.confidence,
     density: annotation.density,
     energy: annotation.energy,
+    evidence: result.evidence,
+    jevMs: result.jevMs,
     layerHint: annotation.layerHint,
     motion: annotation.motion,
     tags: annotation.tags,

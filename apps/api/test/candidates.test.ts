@@ -102,8 +102,12 @@ const fakeAi = (
     const optionIds = Object.keys(request.questions.next.criteria)
 
     return await Promise.resolve({
-      energy: { score, type: 'score' },
-      next: { choice: choose(optionIds), confidence, type: 'choice' },
+      answers: {
+        energy: { score, type: 'score' },
+        next: { choice: choose(optionIds), confidence, type: 'choice' },
+      },
+      model: 'jev-1.14.0',
+      usage: { input_tokens: 1, output_tokens: 1 },
     })
   },
 })

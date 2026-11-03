@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import type { ProbeResult } from '@vev/engines/hydra'
 import type { Clip } from '@vev/shared'
+import * as v from 'valibot'
 import { describe, expect, it, vi } from 'vitest'
 
 import type { ClipFormInput, ProbeFn } from './register-clip.ts'
@@ -10,6 +11,7 @@ import {
   prefillFromCode,
   runProbe,
   submitClip,
+  submitStills,
   submitThumbnail,
 } from './register-clip.ts'
 
@@ -268,5 +270,40 @@ describe(submitThumbnail, () => {
     await expect(submitThumbnail('some-id', blob, ['#zzz'], fetchImpl)).rejects.toThrow(
       'palette entries must be non-empty strings',
     )
+  })
+})
+
+const jpeg = (tail: string): Blob => new Blob([tail], { type: 'image/jpeg' })
+
+describe(submitStills, () => {
+  it('POSTs every still as a multipart `still` part, in order, to the clip-scoped endpoint', async () => {
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({ stillKeys: [] }))
+
+    const outcome = await submitStills('some-id', [jpeg('a'), jpeg('b')], fetchImpl)
+
+    expect(outcome).toBeUndefined()
+    const [endpoint, init] = fetchImpl.mock.calls[0] ?? []
+    expect(endpoint).toBe('/api/clips/some-id/stills')
+    expect(init?.method).toBe('POST')
+    const parts = v.parse(v.instance(FormData), init?.body).getAll('still')
+    await expect(
+      Promise.all(parts.map(async (part) => await v.parse(v.instance(Blob), part).text())),
+    ).resolves.toStrictEqual(['a', 'b'])
+  })
+
+  it('sends nothing when there are no stills', async () => {
+    const fetchImpl = vi.fn<typeof fetch>()
+    await expect(submitStills('some-id', [], fetchImpl)).resolves.toBeUndefined()
+    expect(fetchImpl).not.toHaveBeenCalled()
+  })
+
+  it("reports the route's own message instead of throwing when the upload is refused", async () => {
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(textResponse('Every still must be a JPEG', 400))
+    await expect(submitStills('some-id', [jpeg('a')], fetchImpl)).resolves.toBe('Every still must be a JPEG')
+  })
+
+  it('reports a network failure instead of throwing', async () => {
+    const fetchImpl = vi.fn<typeof fetch>().mockRejectedValue(new Error('network down'))
+    await expect(submitStills('some-id', [jpeg('a')], fetchImpl)).resolves.toBe('network down')
   })
 })

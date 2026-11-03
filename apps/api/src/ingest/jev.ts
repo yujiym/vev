@@ -6,23 +6,46 @@ import * as v from 'valibot'
  *
  * Nothing else in this repository may touch a raw jev request or response: callers describe
  * questions with `scoreQuestion` / `choiceQuestion` / `noulQuestion` and read back the typed
- * answers `askJev` returns. That boundary is a deliberate ruling, not tidiness, because the shapes
- * below are NOT confirmed against the live service — the one call made from this account was
- * rejected with `AiGatewayError: 2021: Insufficient AI Gateway credits` BEFORE the request was
- * validated. The model id and the binding route are proven; the payload is documentation only. So
- * when credits land, one live call either confirms this file or changes this file, and nothing
- * else.
+ * answers `askJev` returns.
+ *
+ * The envelope below is OBSERVED, not documentation: `cf ai run typesafe/jev-1.14.0` on
+ * 2026-11-03 returned
+ *
+ *     { "model": "jev-1.14.0",
+ *       "answers": { "sym": {"type":"noul","noul":0.86}, "density": {...}, "bright": {...} },
+ *       "usage": { "input_tokens": 1162, "output_tokens": 69 } }
+ *
+ * so answers live under `answers`, one per question id, and siblings (`model`, `usage`) sit next
+ * to that object and are ignored. NOT observed: how the Worker's `AI` binding wraps that result.
+ * The model page shows the binding returning the object above directly, and this parser requires
+ * exactly that — a top-level `answers` object, nothing else required. The `{ state, result }`
+ * wrapper the CLI adds around it is deliberately not tolerated here; if the binding turns out to
+ * add one, that is a one-line change in `envelopeSchema`, made on evidence.
+ *
+ * `typesafe/jev` resolves to 1.13; `typesafe/jev-1.14.0` is pinned so a release cannot change what
+ * annotation asks or how it answers without a commit.
  *
  * Quoted from https://developers.cloudflare.com/ai/models/typesafe/jev/ (read 2026-09-29) —
- * `state` is a string or object, `questions` maps a question id to a definition:
+ * `state` is a string or object, `questions` maps a question id to a definition, and `assets` maps
+ * a key to an image the `state` refers to:
  *
  *     score:  { type: 'score',  instructions: '<question>', criteria: ['level 0 desc', 'level 1 desc', ...] }
  *     choice: { type: 'choice', instructions: '<question>', criteria: { option_key: 'desc', ... } }
  *     noul:   { type: 'noul',   instructions: '<statement>', criteria: { true: 'desc', false: 'desc' } }
+ *     image:  { type: 'image',  format: 'png' | 'jpeg', data_base64: '<bytes>' }
  *
  *     score  -> { type: 'score',  score: 1.04, confidence: 0.94, legend: {...}, probabilities: {...} }
  *     choice -> { type: 'choice', choice: 'selected_key', confidence: 0.8, probabilities: {...} }
  *     noul   -> { type: 'noul',   noul: 0.95 }
+ *
+ * Image input, observed the same day through `cf ai run`: `state: { brief, stills: ['still-0', ...] }`
+ * with `assets: { 'still-0': { type: 'image', format: 'jpeg', data_base64 } }` was accepted with
+ * three 512x288 JPEGs and the full 22-question set, and answered in the same shape. The images
+ * cost about 450 input tokens each (3,253 tokens with three against 1,908 without). A 320x180 JPEG
+ * was refused, `[7003] Model execution failed (User Input Error): Invalid image dimensions`, which
+ * is why the browser resizes before upload. TypeSafe's limits: PNG or JPEG only, 280-1568 pixels a
+ * side, 78,400-2,458,624 pixels, 16 MiB an image, 32 MiB a request. Images are labelled beta, so a
+ * caller must be able to fall back to a text-only call (see `annotate.ts`).
  *
  * Three consequences the documentation states and this module enforces: a `score`'s criteria is an
  * ARRAY whose levels are ZERO-BASED, and the answer is a FLOAT within `0 .. criteria.length - 1`
@@ -31,23 +54,14 @@ import * as v from 'valibot'
  * `noul` question is a STATEMENT with true/false criteria whose answer is a bare probability with
  * no confidence field at all.
  *
- * Two things the documentation does NOT state, recorded here as this module's own assumptions
- * because they are what a live call will confirm or refute first:
- *
- * 1. The response envelope. The page shows a per-question answer but not what wraps them, so this
- *    assumes only that each answer sits under the question id that asked for it. It deliberately
- *    does NOT assume the envelope contains nothing else: `jev-facts.md`'s own verified Workers AI
- *    response was `{ response, usage }`, so a `usage` (or `request_id`, or `meta`) sibling next to
- *    the answers is entirely likely, and a parser that demanded every top-level key be an answer
- *    would fail EVERY clip on the first live call. Ids that were asked for are looked up and
- *    decoded; anything else in the envelope is ignored.
- * 2. `confidence` is parsed as OPTIONAL on `score` and `choice` even though it is documented as
- *    present, because nothing here reads it for a decision: requiring an unused field would turn a
- *    cosmetic shape difference into a failed annotation for every clip.
+ * `confidence` is parsed as OPTIONAL on `score` and `choice`. It is documented, and the observed
+ * `choice` answer carried it, but the observed `score` answer did not (it had `score`, `legend`
+ * and `probabilities` only). Nothing here branches on it, so requiring it would have failed every
+ * clip over a field that is only ever logged.
  */
 
-/** `typesafe/jev` is a third-party model billed from prepaid AI Gateway credits, not from Workers Paid neurons. */
-const JEV_MODEL = 'typesafe/jev'
+/** Third-party model billed from prepaid AI Gateway credits, not from Workers Paid neurons. Pinned — see the header. */
+const JEV_MODEL = 'typesafe/jev-1.14.0'
 
 /**
  * The narrow slice of the `AI` binding this module (and the description call in `annotate.ts`)
@@ -106,6 +120,54 @@ export const noulQuestion = (statement: string, whenTrue: string, whenFalse: str
 /** A batch of questions, keyed by an id the caller chooses; the same ids key the answers. */
 export type JevQuestionSet = Readonly<Record<string, JevQuestion>>
 
+/** A rendered still the questions may be judged against. PNG or JPEG only; TypeSafe rejects anything else. */
+export interface JevImage {
+  readonly bytes: Uint8Array
+  readonly format: 'jpeg' | 'png'
+}
+
+/** The request's `assets` entry for one image: the wire spelling of a `JevImage`. */
+interface JevWireImage {
+  readonly data_base64: string
+  readonly format: 'jpeg' | 'png'
+  readonly type: 'image'
+}
+
+/** `btoa` takes a binary string; building it in slices keeps the argument list of `fromCharCode` bounded. */
+const BASE64_SLICE = 0x80_00
+
+const toBase64 = (bytes: Uint8Array): string => {
+  let binary = ''
+  for (let offset = 0; offset < bytes.length; offset += BASE64_SLICE) {
+    binary += String.fromCodePoint(...bytes.subarray(offset, offset + BASE64_SLICE))
+  }
+  return btoa(binary)
+}
+
+const assetKey = (index: number): string => `still-${index}`
+
+/**
+ * With images the `state` is an object that names each asset by its key; without, it stays the
+ * plain string it always was. The `assets` map is the other half of that reference.
+ */
+const toWireRequest = (
+  state: string,
+  wireQuestions: Readonly<Record<string, JevWireQuestion>>,
+  assets: readonly JevImage[],
+) => {
+  if (assets.length === 0) {
+    return { questions: wireQuestions, state }
+  }
+  const wireAssets: Record<string, JevWireImage> = {}
+  const keys: string[] = []
+  for (const [index, image] of assets.entries()) {
+    const key = assetKey(index)
+    keys.push(key)
+    wireAssets[key] = { data_base64: toBase64(image.bytes), format: image.format, type: 'image' }
+  }
+  return { assets: wireAssets, questions: wireQuestions, state: { brief: state, stills: keys } }
+}
+
 /** A decoded answer, range-checked against the question that asked it. */
 export type JevAnswer =
   | { readonly confidence?: number; readonly key: string; readonly kind: 'choice' }
@@ -157,11 +219,10 @@ const answerSchema = v.union([
 ])
 
 /**
- * The envelope, deliberately permissive: an object, with each asked id looked up inside it. Sibling
- * keys the request never asked about (`usage`, a request id, a model name) pass through untouched —
- * see assumption 1 in this module's header for why that is not laxness but the whole point.
+ * The envelope as observed: `answers` holds one entry per asked id. `model` and `usage` beside it
+ * are not declared, so `v.object` drops them; each answer is decoded separately below.
  */
-const envelopeSchema = v.record(v.string(), v.unknown())
+const envelopeSchema = v.object({ answers: v.record(v.string(), v.unknown()) })
 
 type WireAnswer = v.InferOutput<typeof answerSchema>
 
@@ -214,20 +275,21 @@ export const askJev = async (
   ai: AiRunner,
   state: string,
   questions: JevQuestionSet,
+  assets: readonly JevImage[] = [],
 ): Promise<JevAnswerSet> => {
   const asked = Object.entries(questions)
   const wireQuestions = Object.fromEntries(asked.map(([id, question]) => [id, toWireQuestion(question)]))
 
-  const raw = await ai.run(JEV_MODEL, { questions: wireQuestions, state })
+  const raw = await ai.run(JEV_MODEL, toWireRequest(state, wireQuestions, assets))
   const envelope = v.safeParse(envelopeSchema, raw)
   if (!envelope.success) {
-    throw new Error('jev: response was not an object of answers keyed by question id')
+    throw new Error('jev: response had no `answers` object keyed by question id')
   }
 
-  const { output } = envelope
+  const { answers } = envelope.output
   return Object.fromEntries(
     asked.map(([id, question]) => {
-      const value = output[id]
+      const value = answers[id]
       if (value === undefined) {
         throw new Error(`jev: response had no answer for question "${id}"`)
       }

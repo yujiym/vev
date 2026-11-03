@@ -11,6 +11,7 @@ import type { Env } from './env.ts'
 import { candidatesRoutes } from './routes/candidates.ts'
 import { clipsRoutes } from './routes/clips.ts'
 import { clipThumbnailRoutes, mediaRoutes } from './routes/media.ts'
+import { clipStillsRoutes } from './routes/stills.ts'
 import { tracksRoutes } from './routes/tracks.ts'
 
 const api = new Hono<{ Bindings: Env }>().basePath('/api')
@@ -43,6 +44,7 @@ const withLibrary = routes
   .route('/candidates', candidatesRoutes)
   .route('/clips', clipsRoutes)
   .route('/clips', clipThumbnailRoutes)
+  .route('/clips', clipStillsRoutes)
   .route('/tracks', tracksRoutes)
 
 export type AppType = typeof withLibrary

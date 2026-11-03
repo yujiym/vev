@@ -8,6 +8,7 @@
     prefillFromCode,
     runProbe,
     submitClip,
+    submitStills,
     submitThumbnail,
   } from '$lib/register-clip.ts'
   import type { ProbeResult } from '@vev/engines/hydra'
@@ -44,6 +45,8 @@
   let thumbnailBlob: Blob | undefined = $state()
   let thumbnailUrl: string | undefined = $state()
   let palette: string[] = $state([])
+  let stills: Blob[] = $state([])
+  let stillsWarning: string | undefined = $state()
   let recording = $state(false)
   /**
    * Bumped on every successful probe so the `{#key}` block below remounts a fresh `<canvas>`
@@ -72,6 +75,7 @@
     thumbnailBlob = undefined
     thumbnailUrl = undefined
     palette = []
+    stills = []
     try {
       probeResult = await runProbe(code, probeCanvas)
     } finally {
@@ -94,7 +98,7 @@
       // live WebGL context exists at once, since the probe's is already disposed by the time this
       // one is created.
       const capture = await captureThumbnail(code, recordCanvas, THUMBNAIL_MS)
-      ;({ blob: thumbnailBlob, palette } = capture)
+      ;({ blob: thumbnailBlob, palette, stills } = capture)
       thumbnailUrl = URL.createObjectURL(thumbnailBlob)
     } finally {
       recording = false
@@ -107,6 +111,7 @@
 
   const save = async (): Promise<void> => {
     saveError = undefined
+    stillsWarning = undefined
     saving = true
     try {
       const form: ClipFormInput = {
@@ -123,6 +128,10 @@
       }
       const clip = await submitClip(buildNewClip(form))
       savedClipId = clip.id
+
+      // Before the thumbnail, and never throwing: the stills are an enhancement to annotation, so
+      // neither their failure nor the thumbnail's may stop the other.
+      stillsWarning = await submitStills(clip.id, stills)
 
       if (thumbnailBlob) {
         await submitThumbnail(clip.id, thumbnailBlob, palette)
@@ -179,6 +188,7 @@
           <track kind="captions" />
         </video>
         <p>Palette: {palette.join(', ')}</p>
+        <p>Annotation frames: {stills.length}</p>
       {/if}
     </section>
 
@@ -226,6 +236,11 @@
       {/if}
       {#if savedClipId}
         <p role="status">Saved as {savedClipId}.</p>
+      {/if}
+      {#if stillsWarning}
+        <p role="status">
+          The clip is saved, but its frames were not uploaded, so it will be annotated from its code alone: {stillsWarning}
+        </p>
       {/if}
     </section>
   {/if}
