@@ -8,23 +8,23 @@ Five scripts that open the studio screens in a real Chromium and assert on what 
 
 ## Running them
 
-Start the app first, in another terminal — the built SPA served by the local Worker, which is one origin for both the pages and the API:
+Start the app first, in another terminal — the built app served by the local Worker, which is one origin for both the pages and the API:
 
 ```bash
-pnpm live          # builds apps/web and apps/api, then vp preview on 127.0.0.1:8787
+pnpm live          # builds apps/app, then vp preview on 127.0.0.1:8787
 ```
 
 Then, from the repository root:
 
 ```bash
-npx --yes --package playwright@1.63.0 node apps/web/e2e/library.mjs
-npx --yes --package playwright@1.63.0 node apps/web/e2e/editor.mjs
-npx --yes --package playwright@1.63.0 node apps/web/e2e/playback.mjs
-npx --yes --package playwright@1.63.0 node apps/web/e2e/live.mjs
-npx --yes --package playwright@1.63.0 node apps/web/e2e/stills.mjs
+npx --yes --package playwright@1.63.0 node apps/app/e2e/library.mjs
+npx --yes --package playwright@1.63.0 node apps/app/e2e/editor.mjs
+npx --yes --package playwright@1.63.0 node apps/app/e2e/playback.mjs
+npx --yes --package playwright@1.63.0 node apps/app/e2e/live.mjs
+npx --yes --package playwright@1.63.0 node apps/app/e2e/stills.mjs
 ```
 
-If `npx` refuses with `EBADDEVENGINES` (the shell's `node` is not the one `package.json` pins), run it from a scratch directory with an absolute script path instead: `cd "$(mktemp -d)" && npx --yes --package playwright@1.63.0 node /path/to/vev/apps/web/e2e/live.mjs`.
+If `npx` refuses with `EBADDEVENGINES` (the shell's `node` is not the one `package.json` pins), run it from a scratch directory with an absolute script path instead: `cd "$(mktemp -d)" && npx --yes --package playwright@1.63.0 node /path/to/vev/apps/app/e2e/live.mjs`.
 
 `playwright@1.63.0` is pinned in that invocation on purpose; keep it, `lib.mjs`'s loader comment, and this line in step. **`playwright` is not a dependency of this repository and must not become one.**
 
@@ -39,7 +39,7 @@ Each script exits non-zero if any check fails, and prints one `PASS`/`FAIL` line
 An interrupted server can leave `workerd` child processes behind when it is killed abruptly, and they are the most likely reason a driver misbehaves in a way that has nothing to do with the code:
 
 - One still holding `:8787` makes the next `pnpm live` die on bind — so the drivers talk to the **old** Worker, quite possibly serving a **stale build**.
-- One still holding an open handle on `apps/api/.void` keeps the **old database** alive after that directory has been renamed or deleted. A rename does not close a file handle: the process keeps writing to the inode, so a run that looks like it is exercising a fresh database is not. This cost a reviewer real time.
+- One still holding an open handle on `apps/app/.void` keeps the **old database** alive after that directory has been renamed or deleted. A rename does not close a file handle: the process keeps writing to the inode, so a run that looks like it is exercising a fresh database is not. This cost a reviewer real time.
 
 Check and clear before blaming a driver:
 
@@ -49,12 +49,12 @@ pgrep -af workerd
 kill <the PIDs from this checkout>
 ```
 
-Then confirm the port is actually free (`curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8787/api/health` prints `000`) before starting `pnpm live` again. If you are resetting the database, stop every one of those processes **first**, then remove `apps/api/.void`.
+Then confirm the port is actually free (`curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8787/api/health` prints `000`) before starting `pnpm live` again. If you are resetting the database, stop every one of those processes **first**, then remove `apps/app/.void`.
 
 ## What they check
 
 - **`library.mjs`** — `/studio/clips`. That changing a filter really refetches (the `?engine=` request is captured off the network, not inferred) and really narrows the grid; that a browser-side filter never invents a query parameter the route would ignore; that a refused filter shows the route's own 400 message and **no** clips rather than silently falling back to the whole library; and that a clip whose annotation FAILED is marked differently from one still PENDING — one needs a human, the other needs only time.
-- **`editor.mjs`** — `/studio/tracks` and `/studio/tracks/[id]`. That the editor reads `page.params.id` and loads that track's items (not empty, not another track's); that the end-of-list no-ops are visible as disabled buttons; that a reorder made in the UI survives a full page reload and matches what the API reads back from D1; and that the §14.2 commercial refusal reaches the screen naming the offending clip, with nothing stored.
+- **`editor.mjs`** — `/studio/tracks` and `/studio/tracks/[id]`. That the editor reads the route's `id` param (`useParams()`) and loads that track's items (not empty, not another track's); that the end-of-list no-ops are visible as disabled buttons; that a reorder made in the UI survives a full page reload and matches what the API reads back from D1; and that the §14.2 commercial refusal reaches the screen naming the offending clip, with nothing stored.
 - **`playback.mjs`** — `/studio` with a real `/output` window open beside it. That, with the decision layer refused for the whole run, Go is disabled with nothing queued and says why; that loading a track stages its first item and names it; and — the property that has diverged from the reducer twice in this project — that while a fade runs, Go, Back, transition changes and loading a track are refused **and the refusal is visible**, with Go now deliberately still enabled. Then that auto-advance brings the next item in on its `bars` with nobody pressing anything (§7). It also captures the crossfade itself.
 - **`live.mjs`** — `/studio` with a real `/output` window. That three candidates render with their provenance; that a track's own next item is the initial Next; that clicking a candidate replaces Next and `Space` switches to it; that a steering message becomes the standing direction, is labelled `dictionary`, and does not move the show, with Clear removing it; that a failed `/api/candidates` request marks the last candidates stale while playback keeps going (§0 principle 2); and the transport: `H` holds, `B` blacks the output out (and a reloaded output window comes back black), `Esc` freezes it (two screenshots 700ms apart are identical, and differ again once lifted), and Back returns to the previous clip. It does not assert on thumbnail videos: the seeded clips have none.
 - **`stills.mjs`** — `/studio/clips/new` end to end: probe, record, save. That the recording yields three JPEG frames, that each leaves the browser inside TypeSafe's image limits (the 320x180 canvas is below the 280-pixel side minimum, so a frame that was not resized would be refused), and that the clip saves and the upload is accepted. It registers one clip titled `e2e stills` per run, and it writes the frames it captured to `e2e/screenshots/still-N.jpg` so a person can look at them: that they are upright and not black is not something the script can judge.
@@ -62,15 +62,15 @@ Then confirm the port is actually free (`curl -s -o /dev/null -w '%{http_code}' 
 `seed.mjs` creates everything they need and is idempotent; each script calls it. Every fixture is named with an `e2e ` prefix, and the assertions are scoped to those names rather than to totals, so a library with other clips in it does not break them. Run it alone to just set the fixtures up:
 
 ```bash
-node apps/web/e2e/seed.mjs
+node apps/app/e2e/seed.mjs
 ```
 
-It writes `annotation_status` / `reviewed` / `energy` / `tags` straight into the local D1 file with `pnpm exec void db execute` from `apps/api`, because those columns are server-owned (there is no API for them, by design) and annotation cannot run in local mode at all — no AI binding, no queue (§15.3). Those two annotated states are exactly what the library grid has to tell apart, so they have to come from somewhere.
+It writes `annotation_status` / `reviewed` / `energy` / `tags` straight into the local D1 file with `pnpm exec void db execute` from `apps/app`, because those columns are server-owned (there is no API for them, by design) and annotation cannot run in local mode at all — no AI binding, no queue (§15.3). Those two annotated states are exactly what the library grid has to tell apart, so they have to come from somewhere.
 
-There is no DELETE route for tracks, so each `editor.mjs` / `playback.mjs` run leaves a track behind in the local database. That is why their titles carry a timestamp. A local dev D1 is scratch; `rm -rf apps/api/.wrangler/state` resets it, after which `pnpm live` re-applies migrations.
+There is no DELETE route for tracks, so each `editor.mjs` / `playback.mjs` run leaves a track behind in the local database. That is why their titles carry a timestamp. A local dev D1 is scratch; `rm -rf apps/app/.void/v3` resets it, after which `pnpm live` re-applies migrations.
 
 ## What they do NOT prove
 
 - **SwiftShader is not a GPU.** Chromium launches with `--use-gl=swiftshader`, a software rasteriser. The clips render and the compositor blends them, so the render paths execute — but nothing here says anything about frame rate, or about how any of it behaves on a real projector. §15.2's performance questions are untouched.
-- **The output window's pixels are not asserted on.** `gl.readPixels` against that canvas returns all zeros: Hydra runs with `preserveDrawingBuffer: false`, so a read from a separate task, between animation frames, gets an empty buffer even while the canvas visibly renders — the same behaviour already documented in `src/lib/register-clip.ts`'s `captureThumbnail`. The page screenshots composite correctly and are the evidence, but they are evidence **a human has to look at**. `playback.mjs` cannot fail on them and says so when it finishes.
+- **The output window's pixels are not asserted on.** `gl.readPixels` against that canvas returns all zeros: Hydra runs with `preserveDrawingBuffer: false`, so a read from a separate task, between animation frames, gets an empty buffer even while the canvas visibly renders — the same behaviour already documented in `client/register-clip.ts`'s `captureThumbnail`. The page screenshots composite correctly and are the evidence, but they are evidence **a human has to look at**. `playback.mjs` cannot fail on them and says so when it finishes.
 - **Local mode has no Cloudflare Access** (§15.3), so nothing here exercises the Access guard on the owner routes. That is unit-tested only.
