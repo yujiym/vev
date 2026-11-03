@@ -14,19 +14,17 @@ jobs:
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v5
         with:
-          node-version: 24.18.0
+          node-version: 24.22.2
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm --filter web run prepare
+      - run: pnpm --filter app run prepare
       - run: pnpm check
       - run: pnpm test
       - run: pnpm licenses:check
-      # M0's exit condition (§18): `pnpm live` serves the built SPA and the
+      # M0's exit condition (§18): `pnpm live` serves the built app and the
       # API on one origin. Runs `pnpm live` itself (see the script) so a
       # regression there fails CI instead of only a hand-built lookalike.
       - run: bash scripts/smoke-live.sh
-        env:
-          WRANGLER_SEND_METRICS: false
 
   dco:
     runs-on: ubuntu-latest

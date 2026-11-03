@@ -1,0 +1,27 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1790576431452,
+      "tag": "0000_settings",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1790608444786,
+      "tag": "0001_library",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1793678171469,
+      "tag": "0002_clip_stills",
+      "breakpoints": true
+    }
+  ]
+}

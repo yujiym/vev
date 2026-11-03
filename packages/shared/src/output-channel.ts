@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import * as v from 'valibot'
 
-import { slotSchema, transitionSpecSchema } from './playback-types.ts'
+import { panicModeSchema, slotSchema, transitionSpecSchema } from './playback-types.ts'
 
 /**
  * The control window holds the state and sends intents; the output window renders.
@@ -49,6 +49,12 @@ export const outputMessageSchema = v.variant('kind', [
     downbeatAt: v.number(),
     kind: v.literal('clock'),
   }),
+  /**
+   * Output-wide panic (spec §7). `blackout` hides the picture; `freeze` holds the last frame;
+   * `none` restores normal playback. It carries no timestamp because it is not scheduled: a
+   * panic press is meant to be visible on the next frame, not on the next bar.
+   */
+  v.object({ kind: v.literal('panic'), mode: panicModeSchema }),
 ])
 
 export type OutputMessage = v.InferOutput<typeof outputMessageSchema>

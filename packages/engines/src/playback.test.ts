@@ -3,7 +3,17 @@ import { describe, expect, it } from 'vitest'
 
 import type { Clock } from './clock.ts'
 import type { PlaybackState } from './playback.ts'
-import { canGo, canGoNow, canQueue, canSetTransition, initialPlayback, reduce } from './playback.ts'
+import {
+  canBack,
+  canGo,
+  canGoNow,
+  canQueue,
+  canSetTransition,
+  initialPlayback,
+  isHeld,
+  panicMode,
+  reduce,
+} from './playback.ts'
 
 const clock: Clock = { beatsPerBar: 4, bpm: 120, downbeatAt: 0 }
 const cut = { bars: 0, kind: 'cut' } as const
@@ -238,5 +248,129 @@ describe('the control predicates and reduce agree', () => {
 
   it('refuses Go with nothing queued, which a fade-only guard would also allow', () => {
     expect(canGo(initialPlayback('quiet', cut))).toBe(false)
+  })
+})
+
+describe('transport: hold, back and panic', () => {
+  const advancedTo = (clipId: string): PlaybackState => {
+    let state = reduce(start(), { clipId, kind: 'select-next' }, clock)
+    state = reduce(state, { kind: 'go-now', now: 0 }, clock)
+    return reduce(state, { kind: 'tick', now: 0 }, clock)
+  }
+
+  it('Hold toggles the pause, and Go releases it', () => {
+    let state = reduce(start(), { kind: 'hold' }, clock)
+    expect(isHeld(state)).toBe(true)
+    state = reduce(state, { kind: 'hold' }, clock)
+    expect(isHeld(state)).toBe(false)
+
+    state = reduce(state, { clipId: 'loud', kind: 'select-next' }, clock)
+    state = reduce(state, { kind: 'hold' }, clock)
+    expect(isHeld(state)).toBe(true)
+    state = reduce(state, { kind: 'go', now: 0 }, clock)
+    expect(isHeld(state)).toBe(false)
+  })
+
+  it('Hold survives a switch landing and a Back, because neither is the performer releasing it', () => {
+    let state = reduce(start(), { clipId: 'loud', kind: 'select-next' }, clock)
+    state = reduce(state, { kind: 'go', now: 0 }, clock)
+    state = reduce(state, { kind: 'hold' }, clock)
+    state = reduce(state, { kind: 'tick', now: 2000 }, clock)
+    expect(isHeld(state)).toBe(true)
+
+    state = reduce(state, { kind: 'back' }, clock)
+    expect(isHeld(state)).toBe(true)
+  })
+
+  it('records the transition a switch landed with', () => {
+    let state = reduce(start(), { clipId: 'loud', kind: 'select-next' }, clock)
+    expect(state.arrivedBy).toBeUndefined()
+    state = reduce(state, { kind: 'set-transition', transition: fade }, clock)
+    state = reduce(state, { kind: 'go', now: 0 }, clock)
+    state = reduce(state, { kind: 'tick', now: 2000 }, clock)
+    state = reduce(state, { kind: 'tick', now: 6000 }, clock)
+    expect(state.current.clipId).toBe('loud')
+    expect(state.arrivedBy).toStrictEqual(fade)
+  })
+
+  it('records a cut for Back whatever transition is set', () => {
+    let state = reduce(start(), { clipId: 'loud', kind: 'select-next' }, clock)
+    state = reduce(state, { kind: 'set-transition', transition: fade }, clock)
+    state = reduce(state, { kind: 'go-now', now: 0 }, clock)
+    state = reduce(state, { kind: 'tick', now: 0 }, clock)
+    state = reduce(state, { kind: 'tick', now: 4000 }, clock)
+    expect(state.arrivedBy).toStrictEqual(fade)
+
+    state = reduce(state, { kind: 'back' }, clock)
+    expect(state.current.clipId).toBe('quiet')
+    expect(state.arrivedBy).toStrictEqual(cut)
+  })
+
+  it('Back refuses with no previous clip, changing nothing', () => {
+    const before = start()
+    expect(canBack(before)).toBe(false)
+    expect(reduce(before, { kind: 'back' }, clock)).toBe(before)
+  })
+
+  it('Back returns to the previous clip in the free buffer and drops anything queued', () => {
+    let state = advancedTo('loud')
+    expect(state.current).toStrictEqual({ clipId: 'loud', slot: 'b' })
+    state = reduce(state, { clipId: 'third', kind: 'select-next' }, clock)
+    expect(state.next?.clipId).toBe('third')
+
+    state = reduce(state, { kind: 'back' }, clock)
+    expect(state.current).toStrictEqual({ clipId: 'quiet', slot: 'a' })
+    expect(state.next).toBeUndefined()
+    expect(canBack(state)).toBe(false)
+  })
+
+  it('Back walks deeper than the two buffers, one clip per press', () => {
+    let state = advancedTo('loud')
+    state = reduce(state, { clipId: 'third', kind: 'select-next' }, clock)
+    state = reduce(state, { kind: 'go-now', now: 0 }, clock)
+    state = reduce(state, { kind: 'tick', now: 0 }, clock)
+    expect(state.current).toStrictEqual({ clipId: 'third', slot: 'a' })
+
+    state = reduce(state, { kind: 'back' }, clock)
+    expect(state.current).toStrictEqual({ clipId: 'loud', slot: 'b' })
+    state = reduce(state, { kind: 'back' }, clock)
+    expect(state.current).toStrictEqual({ clipId: 'quiet', slot: 'a' })
+  })
+
+  it('refuses Back mid-fade rather than interrupting a transition already in flight', () => {
+    const state = advancedTo('loud')
+    let fading = reduce(state, { clipId: 'third', kind: 'select-next' }, clock)
+    fading = reduce(fading, { kind: 'set-transition', transition: fade }, clock)
+    fading = reduce(fading, { kind: 'go', now: 0 }, clock)
+    fading = reduce(fading, { kind: 'tick', now: 2000 }, clock)
+    expect(fading.fading).toBeDefined()
+
+    expect(canBack(fading)).toBe(false)
+    expect(reduce(fading, { kind: 'back' }, clock)).toBe(fading)
+  })
+
+  it('Blackout and Freeze toggle independently and swap modes', () => {
+    let state = start()
+    expect(panicMode(state)).toBe('none')
+    state = reduce(state, { kind: 'blackout' }, clock)
+    expect(panicMode(state)).toBe('blackout')
+    state = reduce(state, { kind: 'freeze' }, clock)
+    expect(panicMode(state)).toBe('freeze')
+    state = reduce(state, { kind: 'freeze' }, clock)
+    expect(panicMode(state)).toBe('none')
+    state = reduce(state, { kind: 'blackout' }, clock)
+    state = reduce(state, { kind: 'blackout' }, clock)
+    expect(panicMode(state)).toBe('none')
+  })
+
+  it('canBack matches whether reduce accepts back in every state', () => {
+    let state = start()
+    state = reduce(state, { clipId: 'loud', kind: 'select-next' }, clock)
+    state = reduce(state, { kind: 'go', now: 0 }, clock)
+    const armed = state
+    const landed = reduce(armed, { kind: 'tick', now: 2000 }, clock)
+    for (const each of [start(), armed, landed]) {
+      expect(canBack(each)).toBe(reduce(each, { kind: 'back' }, clock) !== each)
+    }
   })
 })

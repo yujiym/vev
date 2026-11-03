@@ -2,17 +2,17 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 #
 # Exercises M0's exit condition (docs/spec.md §18): `pnpm live` —
-# the built SPA served by the local Worker on one origin — actually serves
-# both the app and the API. CI never did this (I1 in the M0 whole-branch
+# the built app served by the local Worker on one origin — actually serves
+# both the pages and the API. CI never did this (I1 in the M0 whole-branch
 # review); this script is the thing CI runs, and the thing you can run
 # yourself: `bash scripts/smoke-live.sh`.
 #
 # It runs `pnpm live` itself rather than reimplementing its steps (build,
-# migrate, `cf dev`), so a regression in that script fails this check
+# migrate, `vp preview`), so a regression in that script fails this check
 # too instead of only being caught by a script that quietly duplicates it.
 set -euo pipefail
 set -m # `pnpm live` gets its own process group, so the EXIT trap can kill
-       # the whole cf/Vite/workerd tree it spawns, not just the immediate
+       # the whole Void/Vite/workerd tree it spawns, not just the immediate
        # `pnpm` process (portable: works without setsid on Linux and macOS).
 
 root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -60,18 +60,38 @@ for field in '"commit"' '"mode"' '"settingsRows"'; do
   echo "$health" | grep -q "$field" || fail "/api/health response is missing $field"
 done
 
-echo "== unmatched deep path falls through to the SPA =="
-deep_body="$(curl -sf "$origin/studio/some/unmatched/deep/path")"
-build_index="$root_dir/apps/web/build/index.html"
-[ -f "$build_index" ] || fail "apps/web/build/index.html is missing after \`pnpm live\` built it"
-if [ "$deep_body" != "$(cat "$build_index")" ]; then
-  fail "an unmatched deep path did not return the built SPA's index.html"
-fi
-echo "matches apps/web/build/index.html"
+echo "== a page path serves the app shell, with its own component =="
+studio_body="$(curl -sf "$origin/studio")"
+echo "$studio_body" | grep -q '"component":"studio"' || fail "/studio did not carry the studio page's shell"
+echo "$studio_body" | grep -q 'data-void-ssr="false"' || fail "/studio was not a client-mounted shell"
 
-echo "== an unmatched /api/* path still 404s (not swallowed by the SPA fallback) =="
+echo "== an unmatched deep path still reaches the app =="
+deep_body="$(curl -sf "$origin/studio/some/unmatched/deep/path")" || fail "an unmatched deep path did not answer 200"
+echo "$deep_body" | grep -q '"component":"\[...path\]"' || fail "an unmatched deep path did not reach the app's catch-all page"
+client_script="$(echo "$deep_body" | grep -o 'src="/assets/pages-client-[^"]*\.js"' | head -n 1 | sed 's/^src="//; s/"$//')"
+[ -n "$client_script" ] || fail "the app shell does not reference its client script"
+curl -sf -o /dev/null "$origin$client_script" || fail "the client script $client_script the shell references does not load"
+echo "shell loads $client_script"
+
+echo "== a trailing slash redirects to the page, not to the catch-all =="
+slash="$(curl -s -o /dev/null -w '%{http_code} %{redirect_url}' "$origin/output/?x=1")"
+[ "$slash" = "308 $origin/output?x=1" ] || fail "expected /output/ to redirect to /output, got: $slash"
+echo "$slash"
+
+echo "== a missing file is a 404, not the app shell =="
+file_404_code="$(curl -s -o /dev/null -w '%{http_code}' "$origin/assets/this-file-does-not-exist.js")"
+[ "$file_404_code" = "404" ] || fail "expected 404 for a missing asset, got $file_404_code"
+echo "404 as expected"
+
+echo "== an unmatched /api/* path still 404s (not swallowed by the app's catch-all) =="
 api_404_code="$(curl -s -o /dev/null -w '%{http_code}' "$origin/api/this-route-does-not-exist")"
 [ "$api_404_code" = "404" ] || fail "expected 404 for an unmatched /api/* path, got $api_404_code"
 echo "404 as expected"
 
-echo "SMOKE OK: pnpm live serves the API and the SPA on one origin"
+echo "== the source offer names the commit /api/health reports (§14.1) =="
+commit="$(echo "$health" | sed -n 's/.*"commit":"\([^"]*\)".*/\1/p')"
+echo "$studio_body" | grep -q "\"commit\":\"$commit\"" || fail "the page's shared data does not carry commit $commit"
+echo "$studio_body" | grep -q '"sourceUrl":"https://' || fail "the page's shared data carries no source URL"
+echo "commit $commit"
+
+echo "SMOKE OK: pnpm live serves the API and the app on one origin"

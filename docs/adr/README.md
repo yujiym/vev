@@ -9,10 +9,13 @@ ADRs are append-only. A decision that changes is recorded as a new ADR that supe
 ## Index
 
 - [0001 — Vite+ toolchain](0001-vite-plus-toolchain.md): lint, format, typecheck and test are driven by Vite+ (`vp`) on the 0.3 line, with the policy migrated from fuda-sh.
-- [0002 — web and API as separate packages](0002-web-and-api-as-separate-packages.md): the SPA and the Worker are two packages, `apps/web` and `apps/api`, built into one deployable Worker rather than unified with `@cloudflare/vite-plugin`.
+- [0002 — web and API as separate packages](0002-web-and-api-as-separate-packages.md): the SPA and the Worker are two packages, `apps/web` and `apps/api`, built into one deployable Worker rather than unified with `@cloudflare/vite-plugin`. Superseded by 0011.
 - [0003 — Valibot for validation](0003-valibot-for-validation.md): runtime validation uses Valibot rather than Zod, for tree-shaking and consistency with the sibling toolchain it was migrated from.
 - [0004 — Playback state as a pure reducer](0004-playback-state-as-a-pure-reducer.md): all switch decisions live in a pure reducer with a wall-clock timestamp; the renderer only executes them — and, discovered in M1, that seam needs its own test, because a pure decision does not guarantee the renderer obeys it.
 - [0005 — Annotation as typed questions](0005-annotation-as-typed-questions.md): most of a clip's metadata is asked of `typesafe/jev` as typed `score` / `choice` / `noul` questions over a fixed tag vocabulary rather than generated as prose, `palette` is read from the rendered frames, and `description` is the one field that is generated.
 - [0006 — cf as the Cloudflare CLI](0006-cf-cli.md): TypeScript Worker configuration and cf commands, with Wrangler retained for bundling and local D1 compatibility.
 - [0007 — Replace the local D1 identity](0007-local-d1-identity.md): preserve existing data under a valid local UUID, remove Wrangler D1 commands, and fix Miniflare watcher lifetime for cf CLI shutdown.
 - [0008 — Cloudflare Vite plugin for the API](0008-cloudflare-vite-plugin.md): remove the Wrangler config and direct dependency while retaining separate web and API packages.
+- [0009 — Void for the Worker](0009-void-for-the-worker.md): `apps/api` runs and deploys on Void, serving `apps/web`'s static build. Supersedes 0006 and 0008.
+- [0010 — Annotation from rendered stills](0010-annotation-from-stills.md): the typed questions are judged against the code plus three rendered JPEG frames the browser uploads, with motion kept on the code and a code-only retry if the call with frames fails. Extends 0005.
+- [0011 — Void Pages, in one package](0011-void-pages.md): the pages and the Worker are one package, `apps/app`, on Void Pages with `ssr = false` everywhere; SvelteKit is gone. Supersedes 0002 and corrects 0009's reasoning for two packages.
