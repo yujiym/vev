@@ -298,7 +298,7 @@ check(
 )
 await until(page, () => !document.body.textContent.includes('Fade in progress'), { timeout: 15_000 })
 await rowButton(page, 'TAP').click()
-await page.waitForTimeout(400)
+await page.waitForTimeout(250)
 await rowButton(page, 'TAP').click()
 const tempo = flat(await page.locator('.bpm').textContent())
 check('tapping moved the tempo', tempo !== '120 BPM', tempo)
@@ -339,10 +339,12 @@ check(
 )
 await form.locator('textarea').fill('osc(5).out()')
 await page.locator('.card').first().click()
+// Whichever side of the bar the check lands on: armed, or already fading. Both refuse, and say so.
 check(
-  'a probe is refused while a switch is armed, and says why',
+  'a probe is refused while a switch is armed or fading, and says why',
   (await form.getByRole('button', { name: 'Run probe' }).isDisabled()) &&
-    (await form.textContent()).includes('A switch is armed'),
+    /A switch is armed|A fade is running/u.test(await form.textContent()),
+  flat(await form.locator('.refusal').textContent()),
 )
 await until(page, () => !document.querySelector('aside:not([hidden]) .refusal'), { timeout: 15_000 })
 
