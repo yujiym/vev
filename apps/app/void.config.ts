@@ -37,6 +37,6 @@ export default defineConfig({
   },
   // Void infers an AI binding from any `env.AI` in the source, which makes `vp preview` open a remote
   // session that needs a Cloudflare login and a network. `deploy-targets.ts` alone decides who gets one.
-  inference: { appType: 'void', bindings: { ai: false, db: false } },
+  inference: { appType: 'void', bindings: { ai: false, db: false }, build: 'vp build' },
   routing: { notFound: 'none' },
 })

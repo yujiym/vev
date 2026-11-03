@@ -21,6 +21,13 @@ const vars = (mode: 'cloud' | 'local') => ({
   VEV_MODE: mode,
 })
 
+// Void checks a new version before moving traffic to it. With Version URLs closed, this binding is
+// the only way it can do that, and it refuses to activate without one.
+const versionMetadata = { binding: 'CF_VERSION_METADATA' }
+
+// A queue consumer has no response to read, so its logs are the only record of why annotation failed.
+const observability = { enabled: true }
+
 export const targets = {
   // Workers AI has no local implementation, and a venue has no network (§15.3).
   local: {
@@ -36,10 +43,12 @@ export const targets = {
     ai: { binding: 'AI' },
     d1_databases: [database('bcee626b-7dbd-4456-8fb9-a708583e6e1d', 'vev-preview')],
     name: 'vev-preview',
+    observability,
     preview_urls: false,
     r2_buckets: [{ binding: 'MEDIA', bucket_name: 'vev-media-preview' }],
     routes: [{ custom_domain: true, pattern: 'vev-preview.0x7.sh' }],
     vars: vars('cloud'),
+    version_metadata: versionMetadata,
     workers_dev: false,
   },
   // No route yet (M12), so this Worker is unreachable until one is attached. Closing both paths now
@@ -49,9 +58,11 @@ export const targets = {
     ai: { binding: 'AI' },
     d1_databases: [database('6554a370-8884-4cbb-9f87-9d891a34ddcd', 'vev')],
     name: 'vev',
+    observability,
     preview_urls: false,
     r2_buckets: [{ binding: 'MEDIA', bucket_name: 'vev-media' }],
     vars: vars('cloud'),
+    version_metadata: versionMetadata,
     workers_dev: false,
   },
 }

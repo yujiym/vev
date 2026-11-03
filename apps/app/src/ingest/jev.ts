@@ -16,11 +16,9 @@ import * as v from 'valibot'
  *       "usage": { "input_tokens": 1162, "output_tokens": 69 } }
  *
  * so answers live under `answers`, one per question id, and siblings (`model`, `usage`) sit next
- * to that object and are ignored. NOT observed: how the Worker's `AI` binding wraps that result.
- * The model page shows the binding returning the object above directly, and this parser requires
- * exactly that — a top-level `answers` object, nothing else required. The `{ state, result }`
- * wrapper the CLI adds around it is deliberately not tolerated here; if the binding turns out to
- * add one, that is a one-line change in `envelopeSchema`, made on evidence.
+ * to that object and are ignored. The CLI prints that object inside `{ state, result }`. On a
+ * deployed Worker the `AI` binding did not return a top-level `answers` (2026-11-03), so both forms
+ * are read, and a response that is neither names its keys in the error.
  *
  * `typesafe/jev` resolves to 1.13; `typesafe/jev-1.14.0` is pinned so a release cannot change what
  * annotation asks or how it answers without a commit.
@@ -222,7 +220,8 @@ const answerSchema = v.union([
  * The envelope as observed: `answers` holds one entry per asked id. `model` and `usage` beside it
  * are not declared, so `v.object` drops them; each answer is decoded separately below.
  */
-const envelopeSchema = v.object({ answers: v.record(v.string(), v.unknown()) })
+const answersEnvelopeSchema = v.object({ answers: v.record(v.string(), v.unknown()) })
+const envelopeSchema = v.union([answersEnvelopeSchema, v.object({ result: answersEnvelopeSchema })])
 
 type WireAnswer = v.InferOutput<typeof answerSchema>
 
@@ -283,10 +282,13 @@ export const askJev = async (
   const raw = await ai.run(JEV_MODEL, toWireRequest(state, wireQuestions, assets))
   const envelope = v.safeParse(envelopeSchema, raw)
   if (!envelope.success) {
-    throw new Error('jev: response had no `answers` object keyed by question id')
+    // The keys and no content, since a response can echo the request.
+    const unread = v.safeParse(v.record(v.string(), v.unknown()), raw)
+    const keys = unread.success ? Object.keys(unread.output).join(', ') : 'not an object'
+    throw new Error(`jev: response had no \`answers\` object keyed by question id (keys: ${keys})`)
   }
 
-  const { answers } = envelope.output
+  const { answers } = 'result' in envelope.output ? envelope.output.result : envelope.output
   return Object.fromEntries(
     asked.map(([id, question]) => {
       const value = answers[id]

@@ -116,6 +116,12 @@ export default defineConfig({
     // interface), and formatting each fenced block as a standalone file
     // dedents that deliberate indentation, turning a paste-in fragment into
     // what reads as top-level code.
-    ignorePatterns: [...(oxfmtPreset.ignorePatterns ?? []), '**/build/**', '.superpowers/**'],
+    ignorePatterns: [
+      ...(oxfmtPreset.ignorePatterns ?? []),
+      // Void rewrites this file on every deploy.
+      'apps/app/void.lock.json',
+      '**/build/**',
+      '.superpowers/**',
+    ],
   },
 })
