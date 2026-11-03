@@ -497,6 +497,9 @@ describe('createLive with a track and an armed switch', () => {
     control.loadTrack({ clips: [], id: 'track-1', steps: trackOf(['one', 'two']).steps, title: 'Set' })
     live.setTrack(trackOf(['one', 'two']))
     expect(live.getSnapshot().live.next).toMatchObject({ clipId: 'one', source: 'track' })
+    await vi.waitFor(() => {
+      expect(live.getSnapshot().live.candidates).toHaveLength(3)
+    })
 
     live.pickCandidate('y')
     live.chooseTransition(CUT)
@@ -659,6 +662,47 @@ describe('createLive with a track and an armed switch', () => {
     expect(control.getSnapshot()).toMatchObject({ next: { clipId: 'x' }, transition: FADE })
     expect(live.getSnapshot().live.next).toMatchObject({ clipId: 'x', transition: FADE })
     expect(live.getSnapshot().live.pickedClipId).toBe('x')
+  })
+
+  it('drops ordinary candidates and in-flight answers when a commercial track is loaded (§14.2)', async () => {
+    const control = createControl(() => {}, { clips: ids.map((id) => playable(id)), startClipId: 'a' })
+    const bodies: CandidateRequest[] = []
+    const held = Promise.withResolvers<CandidateResponse>()
+    const live = createLive({
+      control,
+      fetchCandidates: async (body) => {
+        bodies.push(body)
+        if (bodies.length === 2) {
+          return await held.promise
+        }
+        return await delayed(bodies.length === 1 ? response(['x', 'y']) : response(['z']))
+      },
+      fetchClipById: async (id) => await delayed(clip(id)),
+      fetchLibrarySummaries: async () => await delayed([]),
+    })
+    await vi.waitFor(() => {
+      expect(live.getSnapshot().live.candidates).toHaveLength(2)
+    })
+    live.interpret('darker')
+    await vi.waitFor(() => {
+      expect(bodies).toHaveLength(2)
+    })
+
+    const commercial = { ...trackOf(['one']), mode: 'commercial' as const }
+    control.loadTrack({ clips: [], id: 'track-1', steps: commercial.steps, title: 'Set' })
+    live.setTrack(commercial)
+    expect(live.getSnapshot().live.candidates).toStrictEqual([])
+    await vi.waitFor(() => {
+      expect(live.getSnapshot().live.candidates.map((entry) => entry.clipId)).toStrictEqual(['z'])
+    })
+
+    held.resolve(response(['x', 'y']))
+    await delayed(0)
+    live.pickCandidate('x')
+
+    expect(bodies.at(-1)).toMatchObject({ commercial: true, trackId: 'track-1' })
+    expect(live.getSnapshot().live.candidates.map((entry) => entry.clipId)).toStrictEqual(['z'])
+    expect(control.getSnapshot().next?.clipId).toBe('one')
   })
 
   it('does not offer a candidate whose code could not be fetched', async () => {

@@ -143,6 +143,20 @@ export const applyCandidates = (
 }
 
 /**
+ * Candidates, and any pick or transition choice made against them, belong to the question they
+ * answered. A new track changes that question (its licence mode, its sections), so what is on
+ * screen is not stale but wrong: a clip ranked for an ordinary track may not be played in a
+ * commercial one (spec §14.2).
+ */
+export const discardCandidates = (state: LiveState): LiveState => ({
+  ...state,
+  candidates: [],
+  pickedClipId: undefined,
+  suggestedTransition: undefined,
+  transition: undefined,
+})
+
+/**
  * A failed request keeps the last candidates and marks them stale (spec §0 principle 2). Returning
  * to an empty screen because the network blinked would be the show stopping; the performer keeps
  * a usable Next, labelled as old, and playback never notices.
@@ -931,6 +945,9 @@ export const createLive = (options: CreateLiveOptions): Live => {
     },
     setTrack: (next) => {
       track = next
+      live = discardCandidates(live)
+      // Asking bumps the request id, which also drops any answer still in flight for the old track.
+      void request()
       syncNext({ performer: true })
       notify()
     },
