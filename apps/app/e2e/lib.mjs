@@ -14,7 +14,7 @@ import path from 'node:path'
 
 import { BASE } from './seed.mjs'
 
-export { BASE, seedClips, seedTrack } from './seed.mjs'
+export { BASE, seedClips, seedSingleStepTrack, seedTrack } from './seed.mjs'
 
 /** Where captures land. Git-ignored: they are evidence for the person running this, not artefacts. */
 export const SHOTS = process.env.VEV_E2E_SHOTS ?? path.join(import.meta.dirname, 'screenshots')

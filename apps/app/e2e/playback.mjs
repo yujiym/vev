@@ -25,6 +25,7 @@ import {
   panel,
   rowButton,
   seedClips,
+  seedSingleStepTrack,
   seedTrack,
   shot,
   showNow,
@@ -146,9 +147,50 @@ check('auto-advance brought item 2 in with no further press (§7)', advanced, aw
 check('and the track then reads as ended rather than looping', (await trackStatus()).includes('end of track'))
 await shot(page, '10-stage-auto-advanced')
 
+// --- a clip whose shader will not compile costs its own switch ---
+// Hydra's `.out()` swallows the GLSL error, so `load` returns normally. The picture would switch onto
+// a blank buffer, or onto whichever clip last held the slot, unless the load itself reports it.
+// The clip is a real one whose code this page is told is something else, so nothing that cannot
+// compile is ever stored for a later run's candidates to offer.
+const victim = clips.get('e2e pending annotation')
+const broken = await seedSingleStepTrack(victim)
+await page.route(`**/api/clips/${victim.id}`, async (route) => {
+  const response = await route.fetch()
+  await route.fulfill({
+    json: { ...(await response.json()), code: 'solid("undefined_identifier", 0, 0, 1).out()' },
+    response,
+  })
+})
+const keptTitle = flat((await page.locator('.now-title').textContent()) ?? '')
+// Closing and reopening the panel is what makes it fetch the track list again.
+await rowButton(page, 'Playlist').click()
+await openPanel(page, 'Playlist')
+await panel(page).locator('#track-select').selectOption({ label: broken.title })
+await panel(page).getByRole('button', { exact: true, name: 'Load' }).click()
 check(
-  'no uncaught page errors beyond the 404s this driver injected',
-  pageErrors.every((entry) => entry.includes('404')) && pageErrors.length <= refused,
+  'a clip that did not compile says so on screen',
+  await until(page, () => document.querySelector('.notices .bad')?.textContent?.includes('did not load')),
+  flat(
+    (await page
+      .locator('.notices')
+      .textContent()
+      .catch(() => '')) ?? '',
+  ),
+)
+await page.waitForTimeout(1500)
+check('and is not staged as Next, so Go has nothing to fire', await rowButton(page, 'Go').isDisabled())
+check(
+  'and the picture keeps the clip it had',
+  flat((await page.locator('.now-title').textContent()) ?? '') === keptTitle,
+  flat((await page.locator('.now-title').textContent()) ?? ''),
+)
+
+const refusedLoads = pageErrors.filter((entry) => entry.includes('did not load'))
+check(
+  'no uncaught page errors beyond the 404s this driver injected and the one refusal it asked for',
+  refusedLoads.length === 1 &&
+    pageErrors.every((entry) => entry.includes('404') || refusedLoads.includes(entry)) &&
+    pageErrors.length <= refused + 1,
   pageErrors.join(' | '),
 )
 console.log('\nNOTE: 12/13/14-stage-*.png show the crossfade. Nothing here asserts on them — look at them.')

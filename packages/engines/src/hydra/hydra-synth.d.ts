@@ -23,7 +23,25 @@ declare module 'hydra-synth' {
      */
     getCurrent: () => ReglFramebuffer
     readonly label: string
+    /**
+     * The regl command that draws this output, replaced by every successful `.out()` that targets
+     * it (`src/glsl-source.js` → `src/output.js`'s `render`). `.out()` catches its own errors, so a
+     * clip that fails to build a shader leaves the previous command here, unchanged.
+     */
+    draw: HydraDraw
+    /** Runs `draw` once with the per-frame props, which is what `Hydra.tick` does for every output. */
+    tick: (props: HydraFrameProps) => void
   }
+
+  /** What an output's regl command reads each frame. */
+  export interface HydraFrameProps {
+    readonly bpm: unknown
+    readonly mouse: unknown
+    readonly resolution: readonly [number, number]
+    readonly time: unknown
+  }
+
+  export type HydraDraw = (props: HydraFrameProps) => void
 
   /** A chainable Hydra source/transform expression, as produced by e.g. `osc()` or `src()`. */
   export interface HydraChain {

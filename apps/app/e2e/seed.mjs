@@ -132,6 +132,24 @@ export const seedTrack = async (clips) => {
   })
 }
 
+/**
+ * A track whose only step is `clip`. A driver that wants that step's code to be something else
+ * answers the clip's `GET` itself, so nothing broken is ever registered: the library is what
+ * candidates are drawn from, and a clip that cannot compile must not be offered in later runs.
+ */
+export const seedSingleStepTrack = async (clip) =>
+  await json(`${BASE}/api/tracks`, {
+    body: JSON.stringify({
+      defaultTransition: { bars: 0, kind: 'cut' },
+      items: [{ bars: 4, clipId: clip.id }],
+      mode: 'noncommercial',
+      title: `e2e single-step track ${new Date().toISOString()}`,
+      visibility: 'private',
+    }),
+    headers: { 'content-type': 'application/json' },
+    method: 'POST',
+  })
+
 if (import.meta.filename === process.argv[1]) {
   const clips = await seedClips()
   console.log(`seeded ${clips.size} clips; track: ${(await seedTrack(clips)).title}`)
