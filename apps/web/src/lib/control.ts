@@ -323,7 +323,30 @@ export const createControl = (
     }
   }
 
+  /**
+   * Notices that the staged step has landed, by the SLOT it was loaded into rather than by its
+   * clip id: a track may legitimately name the same clip twice in a row, and comparing ids would
+   * then read the switch as having already happened before it did. The reducer alternates slots on
+   * every queue, so the slot is unambiguous.
+   */
+  const noticeLanding = (): void => {
+    if (run === undefined || run.pendingSlot === undefined) {
+      return
+    }
+    if (state.next !== undefined || state.current.slot !== run.pendingSlot) {
+      return
+    }
+
+    run.index = run.queued
+    run.startedAt = run.armedAt ?? now()
+    run.armedAt = undefined
+    run.pendingSlot = undefined
+  }
+
   const notify = (): void => {
+    // A landing the reducer completed synchronously (Go now over a fade) has to move the cursor
+    // before anyone is told, or a subscriber stages the step that just landed all over again.
+    noticeLanding()
     const current = snapshot()
     for (const listener of listeners) {
       listener(current)
@@ -577,26 +600,6 @@ export const createControl = (
 
     run.queued = next
     run.pendingSlot = staged.slot
-  }
-
-  /**
-   * Notices that the staged step has landed, by the SLOT it was loaded into rather than by its
-   * clip id: a track may legitimately name the same clip twice in a row, and comparing ids would
-   * then read the switch as having already happened before it did. The reducer alternates slots on
-   * every queue, so the slot is unambiguous.
-   */
-  const noticeLanding = (): void => {
-    if (run === undefined || run.pendingSlot === undefined) {
-      return
-    }
-    if (state.next !== undefined || state.current.slot !== run.pendingSlot) {
-      return
-    }
-
-    run.index = run.queued
-    run.startedAt = run.armedAt ?? now()
-    run.armedAt = undefined
-    run.pendingSlot = undefined
   }
 
   /**

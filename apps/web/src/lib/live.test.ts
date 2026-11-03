@@ -527,6 +527,30 @@ describe('createLive with a track and an armed switch', () => {
     expect(control.getSnapshot().next?.clipId).toBe('x')
   })
 
+  it('keeps the track going when Go now finishes a fade: the step that landed is not staged again', async () => {
+    const { advance, control, live } = setup(() => response(['x', 'y', 'z']))
+    await vi.waitFor(() => {
+      expect(live.getSnapshot().live.load).toBe('ok')
+    })
+    const fadeSteps = ['one', 'two', 'x'].map((clipId) => ({ bars: 4, clipId, transition: FADE }))
+    control.loadTrack({ clips: [], id: 'track-1', steps: fadeSteps, title: 'Set' })
+    live.setTrack({ ...trackOf([]), steps: fadeSteps })
+    advance(500)
+    control.go()
+    advance(2000)
+    advance(3000)
+    expect(control.getSnapshot().fading).toBe(true)
+
+    control.goNow()
+
+    expect(control.getSnapshot()).toMatchObject({
+      current: { clipId: 'one' },
+      next: { clipId: 'two' },
+      track: { index: 0, queued: 1 },
+    })
+    expect(live.getSnapshot().live.next).toMatchObject({ clipId: 'two', source: 'track' })
+  })
+
   it('does not offer a candidate whose code could not be fetched', async () => {
     const control = createControl(() => {}, {
       clips: ids.map((id) => playable(id)),

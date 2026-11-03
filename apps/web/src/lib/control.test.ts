@@ -864,6 +864,32 @@ describe('track playback', () => {
     expect(messages.at(-1)).toStrictEqual({ at: 2000, kind: 'switch', to: 'b', transition: CUT_SPEC })
   })
 
+  it('Go now finishing a track fade lands the step before any subscriber hears of it', () => {
+    const clockNow = createFakeNow(0)
+    const { control } = trackControl(clockNow)
+    control.loadTrack(
+      track(['one', 'two', 'three'].map((clipId) => ({ bars: 4, clipId, transition: FADE_SPEC }))),
+    )
+    clockNow.set(500)
+    control.go()
+    clockNow.set(2000)
+    control.tick()
+    clockNow.set(3000)
+    control.tick()
+    expect(control.getSnapshot()).toMatchObject({ fading: true, track: { index: -1 } })
+
+    const heard: unknown[] = []
+    control.subscribe(() => {
+      heard.length = 0
+    })
+    control.subscribe((snapshot) => {
+      heard.push({ current: snapshot.current.clipId, index: snapshot.track?.index })
+    })
+    control.goNow()
+
+    expect(heard).toStrictEqual([{ current: 'one', index: 0 }])
+  })
+
   it('a manual queue that the reducer accepts leaves the track', () => {
     const clockNow = createFakeNow(0)
     const { control } = trackControl(clockNow)
