@@ -3,8 +3,9 @@ import type { Clip, NewTrack, Track, TrackItem, TransitionSpec } from '@vev/shar
 import { newTrackSchema, trackSchema } from '@vev/shared'
 import * as v from 'valibot'
 
-import type { PlayableClip, TrackStep } from './control.ts'
-import { failure } from './library.ts'
+import type { Control, PlayableClip, TrackStep } from './control.ts'
+import { failure, fetchClip } from './library.ts'
+import type { Live } from './live.ts'
 
 /**
  * The track editor's logic, kept out of `.svelte` because `.svelte` is outside the type and lint
@@ -28,7 +29,7 @@ const TRACKS_ENDPOINT = '/api/tracks'
  *
  * An out-of-range `from` is the same no-op rather than a throw: the editor's buttons can only
  * produce valid indices, so an invalid one means a stale render, and a stale render must not take
- * the panel down mid-set (§0).
+ * the stage down mid-set (§0).
  */
 export const moveItem = <T>(items: readonly T[], from: number, direction: MoveDirection): readonly T[] => {
   const to = direction === 'up' ? from - 1 : from + 1
@@ -224,14 +225,45 @@ export const resolveTrack = (track: Track, clips: ReadonlyMap<string, Clip>): Re
 
 /**
  * Fetches every clip a track references, once each, in parallel. `GET /api/tracks/:id` carries ids
- * — never code — so the panel has to gather the code itself; `clipSummarySchema` does not carry it
+ * — never code — so the browser has to gather the code itself; `clipSummarySchema` does not carry it
  * either, by design (a library grid must not ship every clip's source).
  */
 export const fetchTrackClips = async (
   track: Track,
-  fetchClip: (id: string) => Promise<Clip>,
+  loadClip: (id: string) => Promise<Clip>,
 ): Promise<Map<string, Clip>> => {
   const ids = [...new Set(track.items.map((item) => item.clipId))]
-  const clips = await Promise.all(ids.map(async (id) => await fetchClip(id)))
+  const clips = await Promise.all(ids.map(async (id) => await loadClip(id)))
   return new Map(clips.map((clip) => [clip.id, clip]))
+}
+
+/**
+ * Fetches a saved track and puts it on the stage. A fade can start while the fetch is in flight, and
+ * the control refuses a track then, so that is said instead of leaving the screen believing a track
+ * the control never took.
+ */
+export const playTrack = async (
+  id: string,
+  target: {
+    control: Pick<Control, 'getSnapshot' | 'loadTrack'>
+    live: Pick<Live, 'setTrack'>
+  },
+  fetchClipById: (clipId: string) => Promise<Clip> = fetchClip,
+  fetchImpl: typeof fetch = fetch,
+): Promise<void> => {
+  const saved = await fetchTrack(id, fetchImpl)
+  const clips = await fetchTrackClips(saved, fetchClipById)
+  if (!target.control.getSnapshot().canQueue) {
+    throw new Error('A fade started before the track arrived. Load it again once it lands.')
+  }
+
+  const resolved = resolveTrack(saved, clips)
+  target.control.loadTrack(resolved)
+  target.live.setTrack({
+    defaultTransition: resolved.defaultTransition,
+    id: resolved.id,
+    mode: resolved.mode,
+    steps: resolved.steps,
+    title: resolved.title,
+  })
 }

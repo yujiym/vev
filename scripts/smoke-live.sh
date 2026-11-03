@@ -60,22 +60,29 @@ for field in '"commit"' '"mode"' '"settingsRows"'; do
   echo "$health" | grep -q "$field" || fail "/api/health response is missing $field"
 done
 
-echo "== a page path serves the app shell, with its own component =="
-studio_body="$(curl -sf "$origin/studio")"
-echo "$studio_body" | grep -q '"component":"studio"' || fail "/studio did not carry the studio page's shell"
-echo "$studio_body" | grep -q 'data-void-ssr="false"' || fail "/studio was not a client-mounted shell"
+echo "== the stage at / serves the app shell, with its own component =="
+stage_body="$(curl -sf "$origin/")"
+echo "$stage_body" | grep -q '"component":"index"' || fail "/ did not carry the stage page's shell"
+echo "$stage_body" | grep -q 'data-void-ssr="false"' || fail "/ was not a client-mounted shell"
+
+echo "== an old bookmark lands on the stage, not on Not found =="
+for path in /studio /studio/ /studio/clips/new /studio/tracks/some-id /output; do
+  moved="$(curl -s -o /dev/null -w '%{http_code} %{redirect_url}' "$origin$path")"
+  [ "$moved" = "302 $origin/" ] || fail "expected $path to redirect to /, got: $moved"
+done
+echo "/studio, /studio/*, /output -> /"
 
 echo "== an unmatched deep path still reaches the app =="
-deep_body="$(curl -sf "$origin/studio/some/unmatched/deep/path")" || fail "an unmatched deep path did not answer 200"
+deep_body="$(curl -sf "$origin/some/unmatched/deep/path")" || fail "an unmatched deep path did not answer 200"
 echo "$deep_body" | grep -q '"component":"\[...path\]"' || fail "an unmatched deep path did not reach the app's catch-all page"
 client_script="$(echo "$deep_body" | grep -o 'src="/assets/pages-client-[^"]*\.js"' | head -n 1 | sed 's/^src="//; s/"$//')"
 [ -n "$client_script" ] || fail "the app shell does not reference its client script"
 curl -sf -o /dev/null "$origin$client_script" || fail "the client script $client_script the shell references does not load"
 echo "shell loads $client_script"
 
-echo "== a trailing slash redirects to the page, not to the catch-all =="
-slash="$(curl -s -o /dev/null -w '%{http_code} %{redirect_url}' "$origin/output/?x=1")"
-[ "$slash" = "308 $origin/output?x=1" ] || fail "expected /output/ to redirect to /output, got: $slash"
+echo "== a trailing slash redirects to the path, not to the catch-all =="
+slash="$(curl -s -o /dev/null -w '%{http_code} %{redirect_url}' "$origin/some-page/?x=1")"
+[ "$slash" = "308 $origin/some-page?x=1" ] || fail "expected /some-page/ to redirect to /some-page, got: $slash"
 echo "$slash"
 
 echo "== a missing file is a 404, not the app shell =="
@@ -90,8 +97,8 @@ echo "404 as expected"
 
 echo "== the source offer names the commit /api/health reports (§14.1) =="
 commit="$(echo "$health" | sed -n 's/.*"commit":"\([^"]*\)".*/\1/p')"
-echo "$studio_body" | grep -q "\"commit\":\"$commit\"" || fail "the page's shared data does not carry commit $commit"
-echo "$studio_body" | grep -q '"sourceUrl":"https://' || fail "the page's shared data carries no source URL"
+echo "$stage_body" | grep -q "\"commit\":\"$commit\"" || fail "the page's shared data does not carry commit $commit"
+echo "$stage_body" | grep -q '"sourceUrl":"https://' || fail "the page's shared data carries no source URL"
 echo "commit $commit"
 
 echo "SMOKE OK: pnpm live serves the API and the app on one origin"

@@ -65,9 +65,39 @@ export class HydraCompositor {
     this.composeIdle()
   }
 
-  /** Compile `code` into the slot's buffer (`o1` for `a`, `o2` for `b`), rewriting its bare `.out()`. */
+  /**
+   * Compile `code` into the slot's buffer (`o1` for `a`, `o2` for `b`), rewriting its bare `.out()`.
+   *
+   * Throws when the clip did not build a shader that links. Hydra's `.out()` catches its own errors:
+   * a failure while generating GLSL is logged and leaves the output's previous command in place, and
+   * a shader the driver then refuses to link is only noticed when something draws with it, so
+   * `evalClip` returns normally either way and the slot would go on to show a blank buffer, or
+   * whatever clip held it last. Both are caught here, while the slot is still the free one and a
+   * refusal costs only the switch it was loaded for. The probe reaches the same verdict a second way,
+   * from pixels (`probe.ts`'s sentinel); this is the cheap form of it, with no read-back on the show's
+   * thread.
+   */
   load(slot: Slot, code: string): void {
+    const synth = this.requireSynth()
+    const output = bufferFor(synth, slot)
+    const previous = output.draw
+
     this.evalClip(rewriteOut(code, slot))
+
+    if (output.draw === previous) {
+      throw new Error('its shader could not be built, so the buffer was left as it was')
+    }
+    let linked = false
+    try {
+      linked = this.linksCleanly(output)
+    } finally {
+      if (!linked) {
+        output.draw = previous
+      }
+    }
+    if (!linked) {
+      throw new Error('WebGL refused its shader program')
+    }
   }
 
   /**
@@ -181,6 +211,28 @@ export class HydraCompositor {
     const synth = this.requireSynth()
     const hydra = this.requireHydra()
     return hydra.regl.read({ framebuffer: bufferFor(synth, slot).getCurrent() })
+  }
+
+  /**
+   * Draws `output` once and asks WebGL whether it objected. regl links a program on its first draw,
+   * and a program that fails to link makes that draw an INVALID_OPERATION. The draw lands in the free
+   * slot's own buffer, which nothing is showing, so it costs one frame of that clip. Errors already
+   * waiting on the context are drained first, or they would be blamed on this clip.
+   */
+  private linksCleanly(output: HydraOutput): boolean {
+    const synth = this.requireSynth()
+    const { _gl: gl } = this.requireHydra().regl
+    while (gl.getError() !== gl.NO_ERROR) {
+      // Draining only.
+    }
+
+    output.tick({
+      bpm: synth.bpm,
+      mouse: synth.mouse,
+      resolution: [gl.drawingBufferWidth, gl.drawingBufferHeight],
+      time: synth.time,
+    })
+    return gl.getError() === gl.NO_ERROR
   }
 
   private composeIdle(): void {

@@ -163,6 +163,38 @@ describe(captureThumbnail, () => {
     expect(result.stills).toStrictEqual([])
   })
 
+  it.each(['mount', 'load', 'switchTo'] as const)(
+    'disposes the compositor when %s throws, so a clip edited into a syntax error leaks no context',
+    async (failing) => {
+      createFrameLoop()
+      const events: string[] = []
+      const step = (name: string) => () => {
+        events.push(name)
+        if (name === failing) {
+          throw new SyntaxError(`${name} refused`)
+        }
+      }
+      const compositor = {
+        dispose: () => events.push('dispose'),
+        load: step('load'),
+        mount: step('mount'),
+        switchTo: step('switchTo'),
+        tick: () => events.push('tick'),
+      }
+
+      await expect(
+        captureThumbnail('osc(.out()', CANVAS, RECORDING_MS, {
+          createCompositor: async () => await Promise.resolve(compositor as never),
+          now: () => 0,
+          record: async () => await Promise.resolve(new Blob(['webm'])),
+        }),
+      ).rejects.toThrow(`${failing} refused`)
+
+      expect(events.at(-1)).toBe('dispose')
+      expect(events.filter((event) => event === 'tick')).toStrictEqual([])
+    },
+  )
+
   it('disposes the compositor after the recording', async () => {
     const { events } = await recordThrough()
     expect(events.at(-1)).toBe('dispose')

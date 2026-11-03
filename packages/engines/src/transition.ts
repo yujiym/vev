@@ -7,9 +7,8 @@ import type { Clock } from './clock.ts'
 /**
  * How far through a transition `now` is, as 0 to 1.
  *
- * Derived from wall-clock timestamps rather than accumulated frame deltas, so the
- * control and output windows agree on it without exchanging a message per frame,
- * and a dropped frame does not shorten the fade.
+ * Derived from wall-clock timestamps rather than accumulated frame deltas, so the reducer and the
+ * picture agree on when a fade ends, and a dropped frame does not shorten it.
  */
 export const fadeProgress = (spec: TransitionSpec, startedAt: number, now: number, clock: Clock): number => {
   const span = barDurationMs(clock.bpm, clock.beatsPerBar) * spec.bars

@@ -27,11 +27,12 @@ Vite+ (`vp`) drives tests, lint (oxlint) and format (oxfmt) from the root `vite.
 - Use `void` or `cf` for Cloudflare operations, never `wrangler` (ADR 0009).
 - Keep lint strict. Suppress a rule only at the narrowest applicable line, with the reason: `// oxlint-disable-next-line <rule> -- <why>`.
 - Browser code goes under `apps/app/client/` and Worker code under `apps/app/src/`, `middleware/` and `queues/`: they have different tsconfigs because they need different globals (DOM versus `@cloudflare/workers-types`). Pages under `apps/app/pages/` keep `ssr = false` in a `.server.ts` companion, so `hydra-synth` never reaches the Worker bundle.
+- The stage is the only screen. A new screen is a panel under `apps/app/client/stage/panels/`, not a route: navigating unmounts the show. `client/control.ts`'s `dispatch` is the only thing that starts a switch.
 - `vite-plus`, `oxlint`, `oxfmt` and the `vite@*` override in `pnpm-workspace.yaml` move together; that file's comments say why.
 
 ## Repository status
 
-The MVP cut is built on localhost: M0 through M2 (§18), the rule half of M3 and M4, M6's automatic transitions mapped onto `cut` and `crossfade`, M7's dictionary steering, and §12.1's control screen. `apps/app` is the one application package, on Void Pages ([ADR 0011](docs/adr/0011-void-pages.md)): Svelte pages under `pages/` (each with `ssr = false`), browser logic under `client/`, and the Hono app, queue consumer and D1 migrations beside them. `packages/shared`, `packages/engines`, `packages/ingest` and `packages/decision` exist.
+The MVP cut is built on localhost: M0 through M2 (§18), the rule half of M3 and M4, M6's automatic transitions mapped onto `cut` and `crossfade`, M7's dictionary steering, and §12's one-screen stage at `/` ([ADR 0012](docs/adr/0012-one-screen-stage.md)). `apps/app` is the one application package, on Void Pages ([ADR 0011](docs/adr/0011-void-pages.md)): Svelte pages under `pages/` (each with `ssr = false`), browser logic and components under `client/`, and the Hono app, queue consumer and D1 migrations beside them. `packages/shared`, `packages/engines`, `packages/ingest` and `packages/decision` exist.
 
 Not built: embeddings and Vectorize, the settings screen and `systemone-http` providers (M5), textmode.js and ISF (M8, M9), public URLs (M10), audio input, session logging and offline preparation (M11), and self-hosting setup (M12). `services/decision-server` does not exist. §17 says what each leaves open.
 

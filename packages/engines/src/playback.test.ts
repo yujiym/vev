@@ -19,6 +19,10 @@ const clock: Clock = { beatsPerBar: 4, bpm: 120, downbeatAt: 0 }
 const cut = { bars: 0, kind: 'cut' } as const
 const start = () => initialPlayback('quiet', cut)
 
+/** A clip staged and already rendered, so a switch to it may fire. `select-next` alone is only half of that. */
+const stagedReady = (state: PlaybackState, clipId: string): PlaybackState =>
+  reduce(reduce(state, { clipId, kind: 'select-next' }, clock), { kind: 'next-ready' }, clock)
+
 describe('playback', () => {
   it('starts with one clip in slot a and nothing queued', () => {
     const state = start()
@@ -28,26 +32,26 @@ describe('playback', () => {
   })
 
   it('queues a chosen clip into the free slot', () => {
-    const state = reduce(start(), { clipId: 'loud', kind: 'select-next' }, clock)
-    expect(state.next).toStrictEqual({ clipId: 'loud', slot: 'b' })
+    const state = stagedReady(start(), 'loud')
+    expect(state.next).toMatchObject({ clipId: 'loud', slot: 'b' })
   })
 
   it('arms Go for the next bar, not for now', () => {
-    let state = reduce(start(), { clipId: 'loud', kind: 'select-next' }, clock)
+    let state = stagedReady(start(), 'loud')
     state = reduce(state, { kind: 'go', now: 2500 }, clock)
     // 120bpm → a 2000ms bar; 2500 sits mid-bar, so the next downbeat is 4000.
     expect(state.firing?.at).toBe(4000)
   })
 
   it('does not switch before the armed bar arrives', () => {
-    let state = reduce(start(), { clipId: 'loud', kind: 'select-next' }, clock)
+    let state = stagedReady(start(), 'loud')
     state = reduce(state, { kind: 'go', now: 2500 }, clock)
     state = reduce(state, { kind: 'tick', now: 3999 }, clock)
     expect(state.current.clipId).toBe('quiet')
   })
 
   it('switches exactly when the armed bar arrives, swapping the slots', () => {
-    let state = reduce(start(), { clipId: 'loud', kind: 'select-next' }, clock)
+    let state = stagedReady(start(), 'loud')
     state = reduce(state, { kind: 'go', now: 2500 }, clock)
     state = reduce(state, { kind: 'tick', now: 4000 }, clock)
     expect(state.current).toStrictEqual({ clipId: 'loud', slot: 'b' })
@@ -58,7 +62,7 @@ describe('playback', () => {
   it('completes a running fade immediately on Go now rather than swallowing the press', () => {
     const fade = { bars: 4, kind: 'crossfade' } as const
     let state = initialPlayback('quiet', fade)
-    state = reduce(state, { clipId: 'loud', kind: 'select-next' }, clock)
+    state = stagedReady(state, 'loud')
     state = reduce(state, { kind: 'go', now: 0 }, clock)
     state = reduce(state, { kind: 'tick', now: 2000 }, clock)
     expect(state.fading).toBeDefined()
@@ -68,7 +72,7 @@ describe('playback', () => {
   })
 
   it('fires immediately on Go now, without waiting for a bar', () => {
-    let state = reduce(start(), { clipId: 'loud', kind: 'select-next' }, clock)
+    let state = stagedReady(start(), 'loud')
     state = reduce(state, { kind: 'go-now', now: 2500 }, clock)
     expect(state.firing?.at).toBe(2500)
     state = reduce(state, { kind: 'tick', now: 2500 }, clock)
@@ -81,7 +85,7 @@ describe('playback', () => {
   })
 
   it('replaces the queued clip while Go is still armed, keeping the armed moment', () => {
-    let state = reduce(start(), { clipId: 'loud', kind: 'select-next' }, clock)
+    let state = stagedReady(start(), 'loud')
     state = reduce(state, { kind: 'go', now: 2500 }, clock)
     state = reduce(state, { clipId: 'other', kind: 'select-next' }, clock)
     expect(state.next?.clipId).toBe('other')
@@ -91,7 +95,7 @@ describe('playback', () => {
   it('holds a crossfade across its bars before completing', () => {
     const fade = { bars: 2, kind: 'crossfade' } as const
     let state = initialPlayback('quiet', fade)
-    state = reduce(state, { clipId: 'loud', kind: 'select-next' }, clock)
+    state = stagedReady(state, 'loud')
     state = reduce(state, { kind: 'go', now: 0 }, clock)
     expect(state.firing?.at).toBe(2000)
     state = reduce(state, { kind: 'tick', now: 2000 }, clock)
@@ -104,7 +108,7 @@ describe('playback', () => {
   it('refuses Go while a fade is running, changing nothing', () => {
     const fade = { bars: 2, kind: 'crossfade' } as const
     let state = initialPlayback('quiet', fade)
-    state = reduce(state, { clipId: 'loud', kind: 'select-next' }, clock)
+    state = stagedReady(state, 'loud')
     state = reduce(state, { kind: 'go', now: 0 }, clock)
     state = reduce(state, { kind: 'tick', now: 2000 }, clock)
     expect(state.fading).toBeDefined()
@@ -117,7 +121,7 @@ describe('playback', () => {
   it("refuses to queue a new clip while a fade is running, leaving `next` as the fade's own destination", () => {
     const fade = { bars: 2, kind: 'crossfade' } as const
     let state = initialPlayback('quiet', fade)
-    state = reduce(state, { clipId: 'loud', kind: 'select-next' }, clock)
+    state = stagedReady(state, 'loud')
     state = reduce(state, { kind: 'go', now: 0 }, clock)
     state = reduce(state, { kind: 'tick', now: 2000 }, clock)
     expect(state.fading).toBeDefined()
@@ -131,7 +135,7 @@ describe('playback', () => {
   it('refuses to change the transition kind while a fade is running', () => {
     const fade = { bars: 2, kind: 'crossfade' } as const
     let state = initialPlayback('quiet', fade)
-    state = reduce(state, { clipId: 'loud', kind: 'select-next' }, clock)
+    state = stagedReady(state, 'loud')
     state = reduce(state, { kind: 'go', now: 0 }, clock)
     state = reduce(state, { kind: 'tick', now: 2000 }, clock)
     expect(state.fading).toBeDefined()
@@ -144,7 +148,7 @@ describe('playback', () => {
   it('a refused mid-fade transition change does not shorten or complete the fade early', () => {
     const fade = { bars: 2, kind: 'crossfade' } as const
     let state = initialPlayback('quiet', fade)
-    state = reduce(state, { clipId: 'loud', kind: 'select-next' }, clock)
+    state = stagedReady(state, 'loud')
     state = reduce(state, { kind: 'go', now: 0 }, clock)
     state = reduce(state, { kind: 'tick', now: 2000 }, clock)
     state = reduce(state, { kind: 'set-transition', transition: cut }, clock)
@@ -161,7 +165,7 @@ describe('playback', () => {
   })
 
   it('allows changing the transition kind while Go is armed but not yet fading', () => {
-    let state = reduce(start(), { clipId: 'loud', kind: 'select-next' }, clock)
+    let state = stagedReady(start(), 'loud')
     state = reduce(state, { kind: 'go', now: 2500 }, clock)
     const crossfade = { bars: 2, kind: 'crossfade' } as const
     state = reduce(state, { kind: 'set-transition', transition: crossfade }, clock)
@@ -172,7 +176,7 @@ describe('playback', () => {
   it('completes a held crossfade once its bars finish', () => {
     const fade = { bars: 2, kind: 'crossfade' } as const
     let state = initialPlayback('quiet', fade)
-    state = reduce(state, { clipId: 'loud', kind: 'select-next' }, clock)
+    state = stagedReady(state, 'loud')
     state = reduce(state, { kind: 'go', now: 0 }, clock)
     state = reduce(state, { kind: 'tick', now: 2000 }, clock)
     // Still mid-fade one bar before the two-bar span is up: a fade that completes
@@ -199,11 +203,11 @@ const fade = { bars: 2, kind: 'crossfade' } as const
 /** Every state worth asking the question in: idle, queued, armed, mid-fade, and armed-with-a-cut. */
 const STATES = (): { name: string; state: PlaybackState }[] => {
   const idle = initialPlayback('quiet', cut)
-  const queued = reduce(idle, { clipId: 'loud', kind: 'select-next' }, clock)
+  const queued = stagedReady(idle, 'loud')
   const armed = reduce(queued, { kind: 'go', now: 0 }, clock)
 
   const fadeIdle = initialPlayback('quiet', fade)
-  const fadeQueued = reduce(fadeIdle, { clipId: 'loud', kind: 'select-next' }, clock)
+  const fadeQueued = stagedReady(fadeIdle, 'loud')
   const fadeArmed = reduce(fadeQueued, { kind: 'go', now: 0 }, clock)
   const fading = reduce(fadeArmed, { kind: 'tick', now: 2000 }, clock)
 
@@ -227,7 +231,7 @@ describe('the control predicates and reduce agree', () => {
   })
 
   it.each(STATES())('canQueue matches whether reduce accepts select-next — $name', ({ state }) => {
-    expect(canQueue(state)).toBe(reduce(state, { clipId: 'third', kind: 'select-next' }, clock) !== state)
+    expect(canQueue(state)).toBe(stagedReady(state, 'third') !== state)
   })
 
   it.each(STATES())('canSetTransition matches whether reduce accepts set-transition — $name', ({ state }) => {
@@ -253,7 +257,7 @@ describe('the control predicates and reduce agree', () => {
 
 describe('transport: hold, back and panic', () => {
   const advancedTo = (clipId: string): PlaybackState => {
-    let state = reduce(start(), { clipId, kind: 'select-next' }, clock)
+    let state = stagedReady(start(), clipId)
     state = reduce(state, { kind: 'go-now', now: 0 }, clock)
     return reduce(state, { kind: 'tick', now: 0 }, clock)
   }
@@ -264,7 +268,7 @@ describe('transport: hold, back and panic', () => {
     state = reduce(state, { kind: 'hold' }, clock)
     expect(isHeld(state)).toBe(false)
 
-    state = reduce(state, { clipId: 'loud', kind: 'select-next' }, clock)
+    state = stagedReady(state, 'loud')
     state = reduce(state, { kind: 'hold' }, clock)
     expect(isHeld(state)).toBe(true)
     state = reduce(state, { kind: 'go', now: 0 }, clock)
@@ -272,7 +276,7 @@ describe('transport: hold, back and panic', () => {
   })
 
   it('Hold survives a switch landing and a Back, because neither is the performer releasing it', () => {
-    let state = reduce(start(), { clipId: 'loud', kind: 'select-next' }, clock)
+    let state = stagedReady(start(), 'loud')
     state = reduce(state, { kind: 'go', now: 0 }, clock)
     state = reduce(state, { kind: 'hold' }, clock)
     state = reduce(state, { kind: 'tick', now: 2000 }, clock)
@@ -283,7 +287,7 @@ describe('transport: hold, back and panic', () => {
   })
 
   it('records the transition a switch landed with', () => {
-    let state = reduce(start(), { clipId: 'loud', kind: 'select-next' }, clock)
+    let state = stagedReady(start(), 'loud')
     expect(state.arrivedBy).toBeUndefined()
     state = reduce(state, { kind: 'set-transition', transition: fade }, clock)
     state = reduce(state, { kind: 'go', now: 0 }, clock)
@@ -294,7 +298,7 @@ describe('transport: hold, back and panic', () => {
   })
 
   it('records a cut for Back whatever transition is set', () => {
-    let state = reduce(start(), { clipId: 'loud', kind: 'select-next' }, clock)
+    let state = stagedReady(start(), 'loud')
     state = reduce(state, { kind: 'set-transition', transition: fade }, clock)
     state = reduce(state, { kind: 'go-now', now: 0 }, clock)
     state = reduce(state, { kind: 'tick', now: 0 }, clock)
@@ -315,7 +319,7 @@ describe('transport: hold, back and panic', () => {
   it('Back returns to the previous clip in the free buffer and drops anything queued', () => {
     let state = advancedTo('loud')
     expect(state.current).toStrictEqual({ clipId: 'loud', slot: 'b' })
-    state = reduce(state, { clipId: 'third', kind: 'select-next' }, clock)
+    state = stagedReady(state, 'third')
     expect(state.next?.clipId).toBe('third')
 
     state = reduce(state, { kind: 'back' }, clock)
@@ -326,7 +330,7 @@ describe('transport: hold, back and panic', () => {
 
   it('Back walks deeper than the two buffers, one clip per press', () => {
     let state = advancedTo('loud')
-    state = reduce(state, { clipId: 'third', kind: 'select-next' }, clock)
+    state = stagedReady(state, 'third')
     state = reduce(state, { kind: 'go-now', now: 0 }, clock)
     state = reduce(state, { kind: 'tick', now: 0 }, clock)
     expect(state.current).toStrictEqual({ clipId: 'third', slot: 'a' })
@@ -339,7 +343,7 @@ describe('transport: hold, back and panic', () => {
 
   it('refuses Back mid-fade rather than interrupting a transition already in flight', () => {
     const state = advancedTo('loud')
-    let fading = reduce(state, { clipId: 'third', kind: 'select-next' }, clock)
+    let fading = stagedReady(state, 'third')
     fading = reduce(fading, { kind: 'set-transition', transition: fade }, clock)
     fading = reduce(fading, { kind: 'go', now: 0 }, clock)
     fading = reduce(fading, { kind: 'tick', now: 2000 }, clock)
@@ -365,12 +369,274 @@ describe('transport: hold, back and panic', () => {
 
   it('canBack matches whether reduce accepts back in every state', () => {
     let state = start()
-    state = reduce(state, { clipId: 'loud', kind: 'select-next' }, clock)
+    state = stagedReady(state, 'loud')
     state = reduce(state, { kind: 'go', now: 0 }, clock)
     const armed = state
     const landed = reduce(armed, { kind: 'tick', now: 2000 }, clock)
     for (const each of [start(), armed, landed]) {
       expect(canBack(each)).toBe(reduce(each, { kind: 'back' }, clock) !== each)
     }
+  })
+})
+
+describe('choosing a clip', () => {
+  const fadingTo = (clipId: string): PlaybackState => {
+    let state = initialPlayback('quiet', fade)
+    state = stagedReady(state, clipId)
+    state = reduce(state, { kind: 'go', now: 0 }, clock)
+    return reduce(state, { kind: 'tick', now: 2000 }, clock)
+  }
+
+  it('stages the clip into the free slot and arms the next bar, with no Go', () => {
+    const state = reduce(start(), { clipId: 'loud', kind: 'choose', now: 2500 }, clock)
+    expect(state.next).toMatchObject({ clipId: 'loud', slot: 'b' })
+    expect(state.firing?.at).toBe(4000)
+  })
+
+  it('replaces an armed choice and keeps its bar, needing the new clip to render again', () => {
+    let state = reduce(start(), { clipId: 'loud', kind: 'choose', now: 2500 }, clock)
+    state = reduce(state, { kind: 'next-ready' }, clock)
+    state = reduce(state, { clipId: 'other', kind: 'choose', now: 3000 }, clock)
+    expect(state.next).toStrictEqual({ clipId: 'other', ready: false, slot: 'b' })
+    expect(state.firing?.at).toBe(4000)
+  })
+
+  it('choosing the clip already staged keeps its rendered slot, so a default Next can fire at once', () => {
+    let state = stagedReady(start(), 'loud')
+    state = reduce(state, { clipId: 'loud', kind: 'choose', now: 2500 }, clock)
+    expect(state.next?.ready).toBe(true)
+    expect(state.firing?.at).toBe(4000)
+  })
+
+  it('releases Hold, because choosing is an explicit advance like Go', () => {
+    let state = reduce(start(), { kind: 'hold' }, clock)
+    state = reduce(state, { clipId: 'loud', kind: 'choose', now: 2500 }, clock)
+    expect(isHeld(state)).toBe(false)
+  })
+
+  it('during a fade holds the choice and leaves the fade alone', () => {
+    const before = fadingTo('loud')
+    const state = reduce(before, { clipId: 'other', kind: 'choose', now: 3000 }, clock)
+    expect(state.chosen).toBe('other')
+    expect(state.fading).toStrictEqual(before.fading)
+    expect(state.next?.clipId).toBe('loud')
+    expect(state.firing).toBeUndefined()
+  })
+
+  it('fires a held choice on the bar after the fade lands, not before', () => {
+    let state = fadingTo('loud')
+    state = reduce(state, { clipId: 'other', kind: 'choose', now: 3000 }, clock)
+    state = reduce(state, { kind: 'tick', now: 6000 }, clock)
+
+    expect(state.current.clipId).toBe('loud')
+    expect(state.next).toStrictEqual({ clipId: 'other', ready: false, slot: 'a' })
+    expect(state.firing?.at).toBe(8000)
+    expect(state.chosen).toBeUndefined()
+  })
+
+  it('a second choice during the fade replaces the first', () => {
+    let state = fadingTo('loud')
+    state = reduce(state, { clipId: 'other', kind: 'choose', now: 3000 }, clock)
+    state = reduce(state, { clipId: 'third', kind: 'choose', now: 3500 }, clock)
+    state = reduce(state, { kind: 'tick', now: 6000 }, clock)
+    expect(state.next?.clipId).toBe('third')
+  })
+
+  it('choosing the clip the fade is bringing in arms nothing when it lands', () => {
+    let state = fadingTo('loud')
+    state = reduce(state, { clipId: 'loud', kind: 'choose', now: 3000 }, clock)
+    state = reduce(state, { kind: 'tick', now: 6000 }, clock)
+    expect(state.current.clipId).toBe('loud')
+    expect(state.next).toBeUndefined()
+    expect(state.firing).toBeUndefined()
+  })
+
+  it('choosing the armed clip again before the bar cancels the choice and leaves the picture alone', () => {
+    let state = reduce(start(), { clipId: 'loud', kind: 'choose', now: 2500 }, clock)
+    state = reduce(state, { kind: 'next-ready' }, clock)
+    state = reduce(state, { clipId: 'loud', kind: 'choose', now: 3000 }, clock)
+
+    expect(state.next).toBeUndefined()
+    expect(state.firing).toBeUndefined()
+    state = reduce(state, { kind: 'tick', now: 4000 }, clock)
+    expect(state.current).toStrictEqual({ clipId: 'quiet', slot: 'a' })
+  })
+
+  it('a cancelled choice can be made again, and arms the next bar afresh', () => {
+    let state = reduce(start(), { clipId: 'loud', kind: 'choose', now: 2500 }, clock)
+    state = reduce(state, { clipId: 'loud', kind: 'choose', now: 2600 }, clock)
+    state = reduce(state, { clipId: 'loud', kind: 'choose', now: 4100 }, clock)
+
+    expect(state.next).toMatchObject({ clipId: 'loud', ready: false })
+    expect(state.firing?.at).toBe(6000)
+  })
+
+  it('choosing a different clip is a replacement, not a cancel', () => {
+    let state = reduce(start(), { clipId: 'loud', kind: 'choose', now: 2500 }, clock)
+    state = reduce(state, { clipId: 'other', kind: 'choose', now: 3000 }, clock)
+
+    expect(state.next?.clipId).toBe('other')
+    expect(state.firing?.at).toBe(4000)
+  })
+
+  it('choosing a staged clip that nothing has armed arms it, as it always did', () => {
+    let state = stagedReady(start(), 'loud')
+    state = reduce(state, { clipId: 'loud', kind: 'choose', now: 2500 }, clock)
+
+    expect(state.firing?.at).toBe(4000)
+    expect(state.next?.clipId).toBe('loud')
+  })
+
+  it('cancelling leaves Hold as the performer last set it', () => {
+    let state = reduce(start(), { clipId: 'loud', kind: 'choose', now: 2500 }, clock)
+    state = reduce(state, { kind: 'hold' }, clock)
+    state = reduce(state, { clipId: 'loud', kind: 'choose', now: 3000 }, clock)
+
+    expect(isHeld(state)).toBe(true)
+  })
+
+  it('choosing the same clip twice during a fade drops the held choice, and nothing is armed at the landing', () => {
+    let state = fadingTo('loud')
+    state = reduce(state, { clipId: 'other', kind: 'choose', now: 3000 }, clock)
+    state = reduce(state, { clipId: 'other', kind: 'choose', now: 3500 }, clock)
+
+    expect(state.chosen).toBeUndefined()
+    expect(state.fading).toBeDefined()
+    state = reduce(state, { kind: 'tick', now: 6000 }, clock)
+    expect(state.current.clipId).toBe('loud')
+    expect(state.next).toBeUndefined()
+    expect(state.firing).toBeUndefined()
+  })
+
+  it('a Hold pressed after a choice made in a fade survives the landing, and the choice still fires', () => {
+    let state = fadingTo('loud')
+    state = reduce(state, { clipId: 'other', kind: 'choose', now: 3000 }, clock)
+    state = reduce(state, { kind: 'hold' }, clock)
+    state = reduce(state, { kind: 'tick', now: 6000 }, clock)
+
+    expect(isHeld(state)).toBe(true)
+    // Hold pauses automatic advance. It does not take back a switch the performer already asked for.
+    expect(state.next).toMatchObject({ clipId: 'other' })
+    expect(state.firing?.at).toBe(8000)
+  })
+
+  it('a choice made after a Hold, in a fade, still releases it at the landing', () => {
+    let state = fadingTo('loud')
+    state = reduce(state, { kind: 'hold' }, clock)
+    state = reduce(state, { clipId: 'other', kind: 'choose', now: 3000 }, clock)
+    state = reduce(state, { kind: 'tick', now: 6000 }, clock)
+
+    expect(isHeld(state)).toBe(false)
+  })
+
+  it('Go now over a fade finishes it and arms the held choice', () => {
+    let state = fadingTo('loud')
+    state = reduce(state, { clipId: 'other', kind: 'choose', now: 3000 }, clock)
+    state = reduce(state, { kind: 'go-now', now: 3100 }, clock)
+    expect(state.current.clipId).toBe('loud')
+    expect(state.next?.clipId).toBe('other')
+    expect(state.firing?.at).toBe(4000)
+  })
+})
+
+describe('a switch never fires onto a slot that has not rendered', () => {
+  it('slips to the following bar when the clip is not ready at the bar line', () => {
+    let state = reduce(start(), { clipId: 'loud', kind: 'choose', now: 3999 }, clock)
+    state = reduce(state, { kind: 'tick', now: 4000 }, clock)
+    expect(state.current.clipId).toBe('quiet')
+    expect(state.firing?.at).toBe(6000)
+  })
+
+  it('fires on that following bar once the clip has rendered', () => {
+    let state = reduce(start(), { clipId: 'loud', kind: 'choose', now: 3999 }, clock)
+    state = reduce(state, { kind: 'tick', now: 4000 }, clock)
+    state = reduce(state, { kind: 'next-ready' }, clock)
+    state = reduce(state, { kind: 'tick', now: 5999 }, clock)
+    expect(state.current.clipId).toBe('quiet')
+    state = reduce(state, { kind: 'tick', now: 6000 }, clock)
+    expect(state.current.clipId).toBe('loud')
+  })
+
+  it('a Go on a slot that has not rendered slips the same way', () => {
+    let state = reduce(start(), { clipId: 'loud', kind: 'select-next' }, clock)
+    state = reduce(state, { kind: 'go', now: 2500 }, clock)
+    state = reduce(state, { kind: 'tick', now: 4000 }, clock)
+    expect(state.current.clipId).toBe('quiet')
+    expect(state.firing?.at).toBe(6000)
+  })
+
+  it('Go now waits only for the render, and starts its fade from the frame it fires on', () => {
+    let state = initialPlayback('quiet', fade)
+    state = reduce(state, { clipId: 'loud', kind: 'select-next' }, clock)
+    state = reduce(state, { kind: 'go-now', now: 2500 }, clock)
+    state = reduce(state, { kind: 'tick', now: 2516 }, clock)
+    expect(state.fading).toBeUndefined()
+    expect(state.firing?.at).toBe(2500)
+
+    state = reduce(state, { kind: 'next-ready' }, clock)
+    state = reduce(state, { kind: 'tick', now: 2532 }, clock)
+    expect(state.fading?.startedAt).toBe(2532)
+  })
+
+  it('a re-chosen clip must render again before the armed bar', () => {
+    let state = reduce(start(), { clipId: 'loud', kind: 'choose', now: 2500 }, clock)
+    state = reduce(state, { kind: 'next-ready' }, clock)
+    state = reduce(state, { clipId: 'other', kind: 'choose', now: 3999 }, clock)
+    state = reduce(state, { kind: 'tick', now: 4000 }, clock)
+    expect(state.current.clipId).toBe('quiet')
+    expect(state.next?.clipId).toBe('other')
+    expect(state.firing?.at).toBe(6000)
+  })
+
+  it('unstage clears what cannot be played, armed or not', () => {
+    let state = reduce(start(), { clipId: 'broken', kind: 'choose', now: 2500 }, clock)
+    state = reduce(state, { kind: 'unstage' }, clock)
+    expect(state.next).toBeUndefined()
+    expect(state.firing).toBeUndefined()
+  })
+
+  it('next-ready with nothing staged changes nothing', () => {
+    const before = start()
+    expect(reduce(before, { kind: 'next-ready' }, clock)).toBe(before)
+  })
+})
+
+describe('Freeze holds a switch', () => {
+  it('an armed switch slips past its bar while frozen, so the picture and the state agree', () => {
+    let state = stagedReady(start(), 'loud')
+    state = reduce(state, { kind: 'go', now: 2500 }, clock)
+    state = reduce(state, { kind: 'freeze' }, clock)
+    state = reduce(state, { kind: 'tick', now: 4000 }, clock)
+    expect(state.current.clipId).toBe('quiet')
+    expect(state.firing?.at).toBe(6000)
+  })
+
+  it('fires on the first bar after the freeze lifts', () => {
+    let state = stagedReady(start(), 'loud')
+    state = reduce(state, { kind: 'go', now: 2500 }, clock)
+    state = reduce(state, { kind: 'freeze' }, clock)
+    state = reduce(state, { kind: 'tick', now: 4000 }, clock)
+    state = reduce(state, { kind: 'freeze' }, clock)
+    state = reduce(state, { kind: 'tick', now: 6000 }, clock)
+    expect(state.current.clipId).toBe('loud')
+  })
+
+  it('Go now under a freeze fires on the first frame after it lifts', () => {
+    let state = stagedReady(start(), 'loud')
+    state = reduce(state, { kind: 'freeze' }, clock)
+    state = reduce(state, { kind: 'go-now', now: 2500 }, clock)
+    state = reduce(state, { kind: 'tick', now: 3000 }, clock)
+    expect(state.current.clipId).toBe('quiet')
+    state = reduce(state, { kind: 'freeze' }, clock)
+    state = reduce(state, { kind: 'tick', now: 3016 }, clock)
+    expect(state.current.clipId).toBe('loud')
+  })
+
+  it('Blackout does not hold a switch: the picture is still current underneath', () => {
+    let state = stagedReady(start(), 'loud')
+    state = reduce(state, { kind: 'go', now: 2500 }, clock)
+    state = reduce(state, { kind: 'blackout' }, clock)
+    state = reduce(state, { kind: 'tick', now: 4000 }, clock)
+    expect(state.current.clipId).toBe('loud')
   })
 })

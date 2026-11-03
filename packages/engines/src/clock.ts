@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-/** Wall-clock timing for a performance. All timestamps are `Date.now()` milliseconds: the control and output windows are separate documents and only wall-clock values are comparable between them. */
+/** Wall-clock timing for a performance. All timestamps are `Date.now()` milliseconds, which is what lets a bar grid outlive a reload of the stage (`client/show-memory.ts`). */
 export interface Clock {
   bpm: number
   beatsPerBar: number

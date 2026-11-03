@@ -2,7 +2,7 @@
 import type { CandidateRequest, CandidateResponse, Clip, ClipSummary, TransitionSpec } from '@vev/shared'
 import { describe, expect, it, vi } from 'vitest'
 
-import type { Control, PlayableClip } from './control.ts'
+import type { Control, Picture, PlayableClip } from './control.ts'
 import { createControl } from './control.ts'
 import type { ClipMeta, NextInput } from './live.ts'
 import {
@@ -19,6 +19,18 @@ import {
   recordArrival,
   selectNext,
 } from './live.ts'
+
+const QUIET_PICTURE: Picture = {
+  load: () => {
+    // Nothing to draw on in these tests.
+  },
+  switchTo: () => {
+    // Same.
+  },
+  tick: () => {
+    // Same.
+  },
+}
 
 const FADE: TransitionSpec = { bars: 2, kind: 'crossfade' }
 const CUT: TransitionSpec = { bars: 0, kind: 'cut' }
@@ -102,10 +114,10 @@ const failing = async (message: string): Promise<never> => {
   await Promise.resolve()
   throw new Error(message)
 }
-const keyOf = (value: string, extra: { chatFocused?: boolean; shiftKey?: boolean } = {}) =>
+const keyOf = (value: string, extra: { panelOpen?: boolean; shiftKey?: boolean; textEntry?: boolean } = {}) =>
   keyAction(
     { key: value, shiftKey: extra.shiftKey },
-    { chatFocused: extra.chatFocused ?? false, textEntry: false },
+    { panelOpen: extra.panelOpen ?? false, textEntry: extra.textEntry ?? false },
   )
 
 describe(applyCandidates, () => {
@@ -147,16 +159,17 @@ describe(applyCandidates, () => {
     expect(next.candidates).toStrictEqual(ok.candidates)
   })
 
-  it('drops a picked candidate that a new answer no longer offers', () => {
+  it('keeps a chosen card on screen when a new answer no longer offers it', () => {
     const ok = pickCandidate(loaded(['b', 'c', 'd']), 'd')
     const refreshed = applyCandidates(
       beginRequest(ok, 'current'),
       ok.requestId + 1,
-      response(['b', 'c']),
+      response(['e', 'f', 'g']),
       new Map(),
     )
 
-    expect(refreshed.pickedClipId).toBeUndefined()
+    expect(refreshed.pickedClipId).toBe('d')
+    expect(refreshed.candidates.map((entry) => entry.clipId)).toStrictEqual(['e', 'f', 'd'])
   })
 })
 
@@ -256,9 +269,9 @@ describe(selectNext, () => {
 
 describe('the key map', () => {
   it.each([
-    ['1', false, { index: 0, kind: 'select-candidate' }],
-    ['2', false, { index: 1, kind: 'select-candidate' }],
-    ['3', false, { index: 2, kind: 'select-candidate' }],
+    ['1', false, { index: 0, kind: 'choose-candidate' }],
+    ['2', false, { index: 1, kind: 'choose-candidate' }],
+    ['3', false, { index: 2, kind: 'choose-candidate' }],
     [' ', false, { kind: 'go' }],
     [' ', true, { kind: 'go-now' }],
     ['h', false, { kind: 'hold' }],
@@ -270,20 +283,55 @@ describe('the key map', () => {
     expect(keyOf(value, { shiftKey })).toStrictEqual(action)
   })
 
-  it('suspends every single-key shortcut while the chat has focus, except Esc closing it', () => {
+  it('suspends every single-key shortcut while typing, in any panel', () => {
     for (const value of ['1', '2', '3', ' ', 'h', 'b', 'c']) {
-      expect(keyOf(value, { chatFocused: true })).toBeUndefined()
+      expect(keyOf(value, { panelOpen: true, textEntry: true })).toBeUndefined()
     }
-    expect(keyOf('Escape', { chatFocused: true })).toStrictEqual({ kind: 'close-chat' })
   })
 
-  it('leaves keys typed into a field alone', () => {
-    expect(keyAction({ key: 'b' }, { chatFocused: false, textEntry: true })).toBeUndefined()
+  it('keeps the shortcuts working while a panel is merely open, because the show runs behind it', () => {
+    expect(keyOf('b', { panelOpen: true })).toStrictEqual({ kind: 'blackout' })
+    expect(keyOf('1', { panelOpen: true })).toStrictEqual({ index: 0, kind: 'choose-candidate' })
+  })
+
+  it('leaves Space to a button focused inside a panel, and only Space', () => {
+    expect(keyAction({ key: ' ' }, { inPanel: true, panelOpen: true, textEntry: false })).toBeUndefined()
+    expect(keyAction({ key: 'b' }, { inPanel: true, panelOpen: true, textEntry: false })).toStrictEqual({
+      kind: 'blackout',
+    })
+  })
+
+  it('Esc closes an open panel before it means Freeze, wherever the focus is', () => {
+    expect(keyOf('Escape', { panelOpen: true })).toStrictEqual({ kind: 'close-panel' })
+    expect(keyOf('Escape', { panelOpen: true, textEntry: true })).toStrictEqual({ kind: 'close-panel' })
+    expect(keyOf('Escape', { panelOpen: false })).toStrictEqual({ kind: 'freeze' })
+  })
+
+  it('Esc closes the menu before the panel, and the panel before it means Freeze', () => {
+    const options = { panelOpen: true, textEntry: false }
+    expect(keyAction({ key: 'Escape' }, { ...options, menuOpen: true })).toStrictEqual({ kind: 'close-menu' })
+    expect(keyAction({ key: 'Escape' }, { ...options, menuOpen: true, textEntry: true })).toStrictEqual({
+      kind: 'close-menu',
+    })
+    expect(keyAction({ key: 'Escape' }, { ...options, menuOpen: false })).toStrictEqual({
+      kind: 'close-panel',
+    })
+    expect(
+      keyAction({ key: 'Escape' }, { menuOpen: true, panelOpen: false, textEntry: false }),
+    ).toStrictEqual({
+      kind: 'close-menu',
+    })
+  })
+
+  it('keeps every other key working with the menu open, because the show runs behind it', () => {
+    expect(keyAction({ key: 'b' }, { menuOpen: true, panelOpen: false, textEntry: false })).toStrictEqual({
+      kind: 'blackout',
+    })
   })
 
   it('ignores modified keys so browser shortcuts still work', () => {
-    expect(keyAction({ ctrlKey: true, key: 'b' }, { chatFocused: false, textEntry: false })).toBeUndefined()
-    expect(keyAction({ key: 'b', metaKey: true }, { chatFocused: false, textEntry: false })).toBeUndefined()
+    expect(keyAction({ ctrlKey: true, key: 'b' }, { panelOpen: false, textEntry: false })).toBeUndefined()
+    expect(keyAction({ key: 'b', metaKey: true }, { panelOpen: false, textEntry: false })).toBeUndefined()
   })
 })
 
@@ -332,13 +380,10 @@ describe(createLive, () => {
       fetchCandidates?: (body: CandidateRequest) => Promise<CandidateResponse>
     } = {},
   ) => {
-    const published: unknown[] = []
-    const control: Control = createControl(
-      (message) => {
-        published.push(message)
-      },
-      { clips: [playable('a', 'A'), playable('b', 'B'), playable('d', 'D')], startClipId: 'a' },
-    )
+    const control: Control = createControl(QUIET_PICTURE, {
+      clips: [playable('a', 'A'), playable('b', 'B'), playable('d', 'D')],
+      startClipId: 'a',
+    })
     const bodies: CandidateRequest[] = []
     const fetchCandidates = overrides.fetchCandidates ?? (async () => await delayed(response(['b', 'd'])))
 
@@ -353,7 +398,7 @@ describe(createLive, () => {
         await delayed([summary('a', 'A'), summary('b', 'B'), summary('d', 'D')]),
     })
 
-    return { bodies, control, live, published }
+    return { bodies, control, live }
   }
 
   it('requests candidates as soon as the screen opens and names them from the library', async () => {
@@ -367,7 +412,7 @@ describe(createLive, () => {
     expect(live.getSnapshot().live.candidates.map((entry) => entry.title)).toStrictEqual(['B', 'D'])
   })
 
-  it('a candidate click replaces Next through the control window', async () => {
+  it('a candidate click arms the switch for the next bar, with no Go', async () => {
     const { control, live } = setup()
     await vi.waitFor(() => {
       expect(live.getSnapshot().live.candidates).toHaveLength(2)
@@ -376,7 +421,95 @@ describe(createLive, () => {
     live.pickCandidate('d')
 
     expect(control.getSnapshot().next?.clipId).toBe('d')
+    expect(control.getSnapshot().armed).toBe(true)
     expect(live.getSnapshot().live.next?.clipId).toBe('d')
+    expect(live.getSnapshot().live.pickedClipId).toBe('d')
+  })
+
+  it('a second click before the bar replaces the choice and keeps the bar', async () => {
+    const { control, live } = setup()
+    await vi.waitFor(() => {
+      expect(live.getSnapshot().live.candidates).toHaveLength(2)
+    })
+
+    live.pickCandidate('d')
+    const { firingAt } = control.getSnapshot()
+    live.pickCandidate('b')
+
+    expect(control.getSnapshot().next?.clipId).toBe('b')
+    expect(control.getSnapshot().firingAt).toBe(firingAt)
+    expect(live.getSnapshot().live.pickedClipId).toBe('b')
+  })
+
+  it('clicking the outlined card again takes the choice back, and Next is the first candidate again', async () => {
+    const { control, live } = setup()
+    await vi.waitFor(() => {
+      expect(live.getSnapshot().live.candidates).toHaveLength(2)
+    })
+
+    live.pickCandidate('d')
+    live.pickCandidate('d')
+
+    expect(control.getSnapshot()).toMatchObject({ armed: false, next: { clipId: 'b' } })
+    expect(live.getSnapshot().live).toMatchObject({ next: { clipId: 'b', source: 'candidate' } })
+    expect(live.getSnapshot().live.pickedClipId).toBeUndefined()
+  })
+
+  it('pressing the same number key twice takes the choice back', async () => {
+    const { control, live } = setup()
+    await vi.waitFor(() => {
+      expect(live.getSnapshot().live.candidates).toHaveLength(2)
+    })
+
+    expect(live.key({ key: '2' }, { panelOpen: false })).toBe(true)
+    expect(control.getSnapshot().armed).toBe(true)
+    expect(live.key({ key: '2' }, { panelOpen: false })).toBe(true)
+
+    expect(control.getSnapshot().armed).toBe(false)
+    expect(live.getSnapshot().live.pickedClipId).toBeUndefined()
+  })
+
+  it('the 1/2/3 keys arm the card they name', async () => {
+    const { control, live } = setup()
+    await vi.waitFor(() => {
+      expect(live.getSnapshot().live.candidates).toHaveLength(2)
+    })
+
+    expect(live.key({ key: '2' }, { panelOpen: false })).toBe(true)
+
+    expect(control.getSnapshot().next?.clipId).toBe('d')
+    expect(control.getSnapshot().armed).toBe(true)
+    expect(live.key({ key: '3' }, { panelOpen: false })).toBe(false)
+  })
+
+  it('a pick that cannot load is dropped, leaving nothing outlined', async () => {
+    const errors = vi.spyOn(console, 'error').mockReturnValue()
+    const control = createControl(
+      {
+        ...QUIET_PICTURE,
+        load: (_slot, code) => {
+          if (code === 'broken') {
+            throw new SyntaxError('nope')
+          }
+        },
+      },
+      { clips: [playable('a', 'A'), { code: 'broken', id: 'b', title: 'B' }], startClipId: 'a' },
+    )
+    const live = createLive({
+      control,
+      fetchCandidates: async () => await delayed(response(['b'])),
+      fetchClipById: async (id) => await delayed({ ...clip(id), code: 'broken' }),
+      fetchLibrarySummaries: async () => await delayed([]),
+    })
+    await vi.waitFor(() => {
+      expect(live.getSnapshot().live.candidates).toHaveLength(1)
+    })
+
+    live.pickCandidate('b')
+
+    expect(live.getSnapshot().live.pickedClipId).toBeUndefined()
+    expect(control.getSnapshot().armed).toBe(false)
+    errors.mockRestore()
   })
 
   it('a steering message becomes the standing direction and asks again', async () => {
@@ -429,6 +562,8 @@ describe(createLive, () => {
 
     live.pickCandidate('d')
     live.chooseTransition(CUT)
+    control.tick()
+    control.tick()
     control.goNow()
     control.tick()
 
@@ -446,6 +581,8 @@ describe(createLive, () => {
 
     live.pickCandidate('d')
     live.chooseTransition(CUT)
+    control.tick()
+    control.tick()
     control.goNow()
     control.tick()
 
@@ -459,7 +596,7 @@ describe('createLive with a track and an armed switch', () => {
 
   const setup = (answers: (body: CandidateRequest) => CandidateResponse) => {
     let clock = 0
-    const control = createControl(() => {}, {
+    const control = createControl(QUIET_PICTURE, {
       clips: ids.map((id) => playable(id)),
       now: () => clock,
       startClipId: 'a',
@@ -476,6 +613,8 @@ describe('createLive with a track and an armed switch', () => {
     })
     const advance = (to: number) => {
       clock = to
+      control.tick()
+      control.tick()
       control.tick()
     }
     return { advance, bodies, control, live }
@@ -504,11 +643,75 @@ describe('createLive with a track and an armed switch', () => {
     live.pickCandidate('y')
     live.chooseTransition(CUT)
     expect(control.getSnapshot().next?.clipId).toBe('y')
+    expect(control.getSnapshot().armed).toBe(true)
     advance(500)
     control.goNow()
     advance(501)
     expect(control.getSnapshot().current.clipId).toBe('y')
     expect(control.getSnapshot().track).toMatchObject({ index: 0 })
+  })
+
+  it('taking a choice back puts the track’s next item back as Next', async () => {
+    const { control, live } = setup(() => response(['x', 'y', 'z']))
+    await vi.waitFor(() => {
+      expect(live.getSnapshot().live.load).toBe('ok')
+    })
+    control.loadTrack({ clips: [], id: 'track-1', steps: trackOf(['one', 'two']).steps, title: 'Set' })
+    live.setTrack(trackOf(['one', 'two']))
+    await vi.waitFor(() => {
+      expect(live.getSnapshot().live.candidates).toHaveLength(3)
+    })
+
+    live.pickCandidate('y')
+    expect(control.getSnapshot().next?.clipId).toBe('y')
+    live.pickCandidate('y')
+
+    expect(control.getSnapshot()).toMatchObject({ armed: false, next: { clipId: 'one' } })
+    expect(live.getSnapshot().live.next).toMatchObject({ clipId: 'one', source: 'track' })
+    expect(live.getSnapshot().live.pickedClipId).toBeUndefined()
+  })
+
+  it('a track step that will not compile is compiled once across sixty frames, not on every notification', async () => {
+    const errors = vi.spyOn(console, 'error').mockReturnValue()
+    let clock = 0
+    let attempts = 0
+    const control = createControl(
+      {
+        ...QUIET_PICTURE,
+        load: (_slot, code) => {
+          if (code === 'broken()') {
+            attempts += 1
+            throw new SyntaxError('nope')
+          }
+        },
+      },
+      {
+        clips: [playable('a'), { code: 'broken()', id: 'bad', title: 'Bad' }],
+        now: () => clock,
+        startClipId: 'a',
+      },
+    )
+    const live = createLive({
+      control,
+      fetchCandidates: async () => await delayed(response(['x'])),
+      fetchClipById: async (id) => await delayed(clip(id)),
+      fetchLibrarySummaries: async () => await delayed([]),
+    })
+    await vi.waitFor(() => {
+      expect(live.getSnapshot().live.load).toBe('ok')
+    })
+
+    control.loadTrack({ clips: [], id: 'track-1', steps: [cutStep('bad')], title: 'Set' })
+    live.setTrack(trackOf(['bad']))
+    for (let frame = 1; frame <= 60; frame += 1) {
+      clock = frame * 17
+      control.tick()
+    }
+
+    expect(attempts).toBe(1)
+    expect(control.getSnapshot()).toMatchObject({ current: { clipId: 'a' }, next: undefined })
+    expect(control.getSnapshot().pictureFault).toContain('Bad did not load')
+    errors.mockRestore()
   })
 
   it('falls back to candidate #1 once the track has no next item, without moving the track cursor', async () => {
@@ -584,7 +787,6 @@ describe('createLive with a track and an armed switch', () => {
     live.pickCandidate('x')
     live.chooseTransition(FADE)
     advance(500)
-    control.go()
     advance(2000)
     advance(6000)
     expect(control.getSnapshot().current.clipId).toBe('x')
@@ -600,7 +802,7 @@ describe('createLive with a track and an armed switch', () => {
   })
 
   it('cuts to a feedback clip the response ranked second, as spec 9.2 requires', async () => {
-    const control = createControl(() => {}, {
+    const control = createControl(QUIET_PICTURE, {
       clips: [playable('a')],
       startClipId: 'a',
     })
@@ -643,7 +845,7 @@ describe('createLive with a track and an armed switch', () => {
     expect(live.getSnapshot().live.next?.transition).toStrictEqual(control.getSnapshot().transition)
   })
 
-  it('refuses a candidate click and a transition change during a fade, and Next still names what will play', async () => {
+  it('holds a candidate click during a fade, and arms it with a fresh transition when the fade lands', async () => {
     const { advance, control, live } = setup(() => response(['x', 'y', 'z']))
     await vi.waitFor(() => {
       expect(live.getSnapshot().live.load).toBe('ok')
@@ -651,21 +853,87 @@ describe('createLive with a track and an armed switch', () => {
     live.pickCandidate('x')
     live.chooseTransition(FADE)
     advance(500)
-    control.go()
     advance(2000)
     expect(control.getSnapshot().fading).toBe(true)
 
     live.pickCandidate('y')
     live.chooseTransition(CUT)
-    expect(live.key({ key: '3' }, { chatFocused: false })).toBe(true)
 
-    expect(control.getSnapshot()).toMatchObject({ next: { clipId: 'x' }, transition: FADE })
-    expect(live.getSnapshot().live.next).toMatchObject({ clipId: 'x', transition: FADE })
-    expect(live.getSnapshot().live.pickedClipId).toBe('x')
+    expect(live.getSnapshot()).toMatchObject({
+      control: { chosenClipId: 'y', next: { clipId: 'x' }, transition: FADE },
+      live: { next: { clipId: 'x', transition: FADE }, pickedClipId: 'y' },
+    })
+
+    advance(6000)
+    expect(live.getSnapshot()).toMatchObject({
+      control: { armed: true, current: { clipId: 'x' }, firingAt: 8000, next: { clipId: 'y' } },
+      live: { pickedClipId: 'y' },
+    })
+
+    advance(8000)
+    advance(20_000)
+    expect(live.getSnapshot()).toMatchObject({
+      control: { current: { clipId: 'y' } },
+      live: { pickedClipId: undefined },
+    })
+  })
+
+  it('keeps the chosen card through the fresh answer a landing asks for', async () => {
+    const { advance, control, live } = setup((body) =>
+      body.currentClipId === 'x' ? response(['one', 'two', 'z']) : response(['x', 'y', 'z']),
+    )
+    await vi.waitFor(() => {
+      expect(live.getSnapshot().live.load).toBe('ok')
+    })
+    live.pickCandidate('x')
+    live.chooseTransition(FADE)
+    advance(500)
+    advance(2000)
+    live.pickCandidate('y')
+    advance(6000)
+
+    await vi.waitFor(() => {
+      expect(live.getSnapshot().live.candidates.map((entry) => entry.clipId)).toStrictEqual([
+        'one',
+        'two',
+        'y',
+      ])
+    })
+    expect(control.getSnapshot().next?.clipId).toBe('y')
+  })
+
+  it('a chosen candidate takes the place of the track’s next item, during a fade as well', async () => {
+    const { advance, control, live } = setup(() => response(['x', 'y', 'z']))
+    await vi.waitFor(() => {
+      expect(live.getSnapshot().live.load).toBe('ok')
+    })
+    const steps = ['one', 'two', 'a'].map((clipId) => ({ bars: 4, clipId, transition: FADE }))
+    control.loadTrack({ clips: [], id: 'track-1', steps, title: 'Set' })
+    live.setTrack({ ...trackOf([]), steps })
+    await vi.waitFor(() => {
+      expect(live.getSnapshot().live.candidates).toHaveLength(3)
+    })
+    advance(10)
+    control.go()
+    advance(2000)
+    expect(control.getSnapshot().fading).toBe(true)
+
+    live.pickCandidate('y')
+    advance(6000)
+    expect(control.getSnapshot()).toMatchObject({
+      current: { clipId: 'one' },
+      next: { clipId: 'y' },
+      track: { index: 0, queued: 1 },
+    })
+
+    advance(8000)
+    advance(12_000)
+    expect(control.getSnapshot()).toMatchObject({ current: { clipId: 'y' }, track: { index: 1, queued: 2 } })
+    expect(control.getSnapshot().next?.clipId).toBe('a')
   })
 
   it('drops ordinary candidates and in-flight answers when a commercial track is loaded (§14.2)', async () => {
-    const control = createControl(() => {}, { clips: ids.map((id) => playable(id)), startClipId: 'a' })
+    const control = createControl(QUIET_PICTURE, { clips: ids.map((id) => playable(id)), startClipId: 'a' })
     const bodies: CandidateRequest[] = []
     const held = Promise.withResolvers<CandidateResponse>()
     const live = createLive({
@@ -706,7 +974,7 @@ describe('createLive with a track and an armed switch', () => {
   })
 
   it('does not offer a candidate whose code could not be fetched', async () => {
-    const control = createControl(() => {}, {
+    const control = createControl(QUIET_PICTURE, {
       clips: ids.map((id) => playable(id)),
       startClipId: 'a',
     })

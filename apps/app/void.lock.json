@@ -5,91 +5,57 @@
     "compatibility_flags": [
       "nodejs_compat"
     ],
-    "ai": {
-      "binding": "AI"
-    },
     "d1_databases": [
       {
         "binding": "DB",
-        "database_id": "bcee626b-7dbd-4456-8fb9-a708583e6e1d",
-        "database_name": "vev-preview",
+        "database_id": "9b91c754-01f5-4399-98a7-bc8b5c9e65e8",
+        "database_name": "vev",
         "migrations_dir": "./db/migrations"
       }
     ],
-    "name": "vev-preview",
-    "observability": {
-      "enabled": true
-    },
-    "preview_urls": false,
+    "name": "vev-local",
     "r2_buckets": [
       {
         "binding": "MEDIA",
-        "bucket_name": "vev-media-preview"
-      }
-    ],
-    "routes": [
-      {
-        "custom_domain": true,
-        "pattern": "vev-preview.0x7.sh"
+        "bucket_name": "vev-media"
       }
     ],
     "vars": {
-      "ACCESS_AUD": "2751fc6207bcfd7f632e739f25ffd5a12a8325b4fcd8825fb9cbeac9bdf01ffd",
-      "ACCESS_TEAM_DOMAIN": "710gs.cloudflareaccess.com",
+      "ACCESS_AUD": "unused-in-local-mode",
+      "ACCESS_TEAM_DOMAIN": "unused-in-local-mode",
       "SOURCE_URL": "https://github.com/yujiym/vev",
-      "VEV_MODE": "cloud",
-      "GIT_COMMIT": "5cf2581"
-    },
-    "version_metadata": {
-      "binding": "CF_VERSION_METADATA"
-    },
-    "workers_dev": false
+      "VEV_MODE": "local",
+      "GIT_COMMIT": "4c56101"
+    }
   },
   "resolved": {
     "compatibility_date": "2026-09-01",
     "compatibility_flags": [
       "nodejs_compat"
     ],
-    "ai": {
-      "binding": "AI"
-    },
     "d1_databases": [
       {
         "binding": "DB",
-        "database_id": "bcee626b-7dbd-4456-8fb9-a708583e6e1d",
-        "database_name": "vev-preview",
+        "database_id": "9b91c754-01f5-4399-98a7-bc8b5c9e65e8",
+        "database_name": "vev",
         "migrations_dir": "./db/migrations"
       }
     ],
-    "name": "vev-preview",
-    "preview_urls": false,
+    "name": "vev-local",
     "r2_buckets": [
       {
         "binding": "MEDIA",
-        "bucket_name": "vev-media-preview"
-      }
-    ],
-    "routes": [
-      {
-        "custom_domain": true,
-        "pattern": "vev-preview.0x7.sh"
+        "bucket_name": "vev-media"
       }
     ],
     "vars": {
-      "ACCESS_AUD": "2751fc6207bcfd7f632e739f25ffd5a12a8325b4fcd8825fb9cbeac9bdf01ffd",
-      "ACCESS_TEAM_DOMAIN": "710gs.cloudflareaccess.com",
+      "ACCESS_AUD": "unused-in-local-mode",
+      "ACCESS_TEAM_DOMAIN": "unused-in-local-mode",
       "SOURCE_URL": "https://github.com/yujiym/vev",
-      "VEV_MODE": "cloud",
-      "GIT_COMMIT": "5cf2581"
+      "VEV_MODE": "local",
+      "GIT_COMMIT": "4c56101"
     },
-    "version_metadata": {
-      "binding": "CF_VERSION_METADATA"
-    },
-    "workers_dev": false,
-    "account_id": "4d8de8be5b03d5f77ca1be4e3c0db5b2",
-    "observability": {
-      "enabled": true
-    }
+    "account_id": "4d8de8be5b03d5f77ca1be4e3c0db5b2"
   },
-  "text": "{\n  \"compatibility_date\": \"2026-09-01\",\n  \"compatibility_flags\": [\n    \"nodejs_compat\"\n  ],\n  \"ai\": {\n    \"binding\": \"AI\"\n  },\n  \"d1_databases\": [\n    {\n      \"binding\": \"DB\",\n      \"database_id\": \"bcee626b-7dbd-4456-8fb9-a708583e6e1d\",\n      \"database_name\": \"vev-preview\",\n      \"migrations_dir\": \"./db/migrations\"\n    }\n  ],\n  \"name\": \"vev-preview\",\n  \"preview_urls\": false,\n  \"r2_buckets\": [\n    {\n      \"binding\": \"MEDIA\",\n      \"bucket_name\": \"vev-media-preview\"\n    }\n  ],\n  \"routes\": [\n    {\n      \"custom_domain\": true,\n      \"pattern\": \"vev-preview.0x7.sh\"\n    }\n  ],\n  \"vars\": {\n    \"ACCESS_AUD\": \"2751fc6207bcfd7f632e739f25ffd5a12a8325b4fcd8825fb9cbeac9bdf01ffd\",\n    \"ACCESS_TEAM_DOMAIN\": \"710gs.cloudflareaccess.com\",\n    \"SOURCE_URL\": \"https://github.com/yujiym/vev\",\n    \"VEV_MODE\": \"cloud\",\n    \"GIT_COMMIT\": \"5cf2581\"\n  },\n  \"version_metadata\": {\n    \"binding\": \"CF_VERSION_METADATA\"\n  },\n  \"workers_dev\": false,\n  \"account_id\": \"4d8de8be5b03d5f77ca1be4e3c0db5b2\",\n  \"observability\": {\n    \"enabled\": true\n  }\n}\n"
+  "text": "{\n  \"compatibility_date\": \"2026-09-01\",\n  \"compatibility_flags\": [\n    \"nodejs_compat\"\n  ],\n  \"d1_databases\": [\n    {\n      \"binding\": \"DB\",\n      \"database_id\": \"9b91c754-01f5-4399-98a7-bc8b5c9e65e8\",\n      \"database_name\": \"vev\",\n      \"migrations_dir\": \"./db/migrations\"\n    }\n  ],\n  \"name\": \"vev-local\",\n  \"r2_buckets\": [\n    {\n      \"binding\": \"MEDIA\",\n      \"bucket_name\": \"vev-media\"\n    }\n  ],\n  \"vars\": {\n    \"ACCESS_AUD\": \"unused-in-local-mode\",\n    \"ACCESS_TEAM_DOMAIN\": \"unused-in-local-mode\",\n    \"SOURCE_URL\": \"https://github.com/yujiym/vev\",\n    \"VEV_MODE\": \"local\",\n    \"GIT_COMMIT\": \"4c56101\"\n  },\n  \"account_id\": \"4d8de8be5b03d5f77ca1be4e3c0db5b2\"\n}\n"
 }

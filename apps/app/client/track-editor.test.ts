@@ -2,12 +2,14 @@
 import type { Clip, Track, TrackItem } from '@vev/shared'
 import { describe, expect, it } from 'vitest'
 
+import type { Control } from './control.ts'
 import {
   appendItem,
   buildNewTrack,
   createTrack,
   fetchTrackClips,
   moveItem,
+  playTrack,
   removeItem,
   resolveTrack,
   setSection,
@@ -269,5 +271,59 @@ describe(fetchTrackClips, () => {
 
     expect(asked).toStrictEqual(['clip-1', 'clip-2'])
     expect([...clips.keys()]).toStrictEqual(['clip-1', 'clip-2'])
+  })
+})
+
+const target = (canQueue: boolean) => {
+  const loaded: string[] = []
+  const set: (string | undefined)[] = []
+  return {
+    control: {
+      getSnapshot: () => ({ canQueue }) as ReturnType<Control['getSnapshot']>,
+      loadTrack: (track: { id: string }) => {
+        loaded.push(track.id)
+      },
+    },
+    live: {
+      setTrack: (track: { id: string } | undefined) => {
+        set.push(track?.id)
+      },
+    },
+    loaded,
+    set,
+  }
+}
+
+describe(playTrack, () => {
+  const saved = {
+    defaultTransition: { bars: 2, kind: 'crossfade' },
+    id: 't1',
+    items: [{ clipId: 'c1', section: 'intro' }],
+    mode: 'noncommercial',
+    ownerId: 'owner',
+    slug: 't1',
+    title: 'Set',
+    visibility: 'private',
+  }
+  const clip = { code: 'osc().out()', defaultBars: 8, id: 'c1', title: 'One' } as unknown as Clip
+  const fetchSaved = (async () => await Promise.resolve(Response.json(saved))) as typeof fetch
+
+  it('hands the resolved track to both the control and the candidates', async () => {
+    const stage = target(true)
+
+    await playTrack('t1', stage, async () => await Promise.resolve(clip), fetchSaved)
+
+    expect(stage.loaded).toStrictEqual(['t1'])
+    expect(stage.set).toStrictEqual(['t1'])
+  })
+
+  it('says so when a fade began during the fetch, leaving the candidates on the track they were for', async () => {
+    const stage = target(false)
+
+    await expect(playTrack('t1', stage, async () => await Promise.resolve(clip), fetchSaved)).rejects.toThrow(
+      'A fade started',
+    )
+    expect(stage.loaded).toStrictEqual([])
+    expect(stage.set).toStrictEqual([])
   })
 })

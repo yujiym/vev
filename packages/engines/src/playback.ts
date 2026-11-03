@@ -11,15 +11,31 @@ interface Loaded {
   slot: Slot
 }
 
+/**
+ * A clip in the free slot. `ready` is false until that slot has rendered: Hydra samples a buffer
+ * from before its own draw, so a cut straight after a load shows two frames of black, or of the
+ * clip that slot last held (measured in a browser, ADR 0012). The renderer reports it with
+ * `next-ready`, and `tick` will not fire without it.
+ */
+interface Staged extends Loaded {
+  ready: boolean
+}
+
 /** How many clips Back can walk through. A set is long; a stack that grows forever is a leak. */
 const HISTORY_LIMIT = 20
 
 export interface PlaybackState {
   current: Loaded
-  next?: Loaded
+  next?: Staged
   transition: TransitionSpec
-  /** Set once Go is armed: the wall-clock moment the switch begins. */
-  firing?: { at: number }
+  /**
+   * Set once a switch is armed: the wall-clock moment it begins. `onBar` is what happens if it
+   * cannot fire then: a bar-quantised switch slips to the following bar, a Go now waits for the
+   * first frame it can fire on.
+   */
+  firing?: { at: number; onBar: boolean }
+  /** Chosen during a fade, when the free slot is the fade's own target. Armed when the fade lands. */
+  chosen?: string
   /** Set while a crossfade is running; absent for a cut, which completes instantly. */
   fading?: { from: Slot; to: Slot; startedAt: number }
   /** Set by Hold: auto-advance is paused until the performer presses Go again (spec §7). */
@@ -37,6 +53,9 @@ export interface PlaybackState {
 
 export type PlaybackEvent =
   | { kind: 'select-next'; clipId: string }
+  | { kind: 'choose'; clipId: string; now: number }
+  | { kind: 'next-ready' }
+  | { kind: 'unstage' }
   | { kind: 'go'; now: number }
   | { kind: 'go-now'; now: number }
   | { kind: 'set-transition'; transition: TransitionSpec }
@@ -60,7 +79,7 @@ const other = (slot: Slot): Slot => (slot === 'a' ? 'b' : 'a')
  * a second implementation of a rule this module owns, and the two drift. In M1 they drifted three
  * times, and the ruling that came out of it named only the fade — so a panel guarding on `fading`
  * alone still offered Go with nothing queued, and still offered it after Go was already armed.
- * The fix is not another guard in the panel; it is that there is only one predicate, exported, and
+ * The fix is not another guard in the screen; it is that there is only one predicate, exported, and
  * `reduce`'s own guards are written in terms of it. A control the reducer refuses is exactly a
  * control the UI must disable, by construction rather than by agreement.
  */
@@ -101,7 +120,8 @@ const complete = (state: PlaybackState): PlaybackState => {
 
   const next: PlaybackState = {
     arrivedBy: state.transition,
-    current: state.next,
+    chosen: state.chosen,
+    current: { clipId: state.next.clipId, slot: state.next.slot },
     history: [...(state.history ?? []), state.current].slice(-HISTORY_LIMIT),
     transition: state.transition,
   }
@@ -114,18 +134,61 @@ const complete = (state: PlaybackState): PlaybackState => {
   return next
 }
 
-const tick = (state: PlaybackState, now: number, clock: Clock): PlaybackState => {
-  if (state.fading) {
-    const span = barDurationMs(clock.bpm, clock.beatsPerBar) * state.transition.bars
-    if (now < state.fading.startedAt + span) {
-      return state
-    }
+const staged = (state: PlaybackState, clipId: string): Staged =>
+  state.next?.clipId === clipId ? state.next : { clipId, ready: false, slot: other(state.current.slot) }
 
-    return complete(state)
+/**
+ * The performer's choice, in one rule per state. Armed already: the new clip takes the same bar.
+ * Mid-fade: there is no free slot to stage into, so it waits for the landing rather than being lost.
+ * Choosing is an explicit advance, so it releases Hold as Go does.
+ *
+ * Choosing the clip that is already armed, or already held through the fade, takes the choice back:
+ * nothing switches, and the picture carries on. That is a second press on the same card or key, and
+ * `held` stays as the performer last left it, because nothing here is an advance.
+ */
+const choose = (state: PlaybackState, clipId: string, now: number, clock: Clock): PlaybackState => {
+  if (state.fading) {
+    return state.chosen === clipId
+      ? { ...state, chosen: undefined }
+      : { ...state, chosen: clipId, held: false }
+  }
+  if (state.firing !== undefined && state.next?.clipId === clipId) {
+    return { ...state, firing: undefined, next: undefined }
   }
 
-  if (!state.firing || now < state.firing.at) {
+  return {
+    ...state,
+    firing: state.firing ?? { at: nextBarAt(clock, now), onBar: true },
+    held: false,
+    next: staged(state, clipId),
+  }
+}
+
+/**
+ * What a landing does with a choice held through the fade. Choosing the clip that just landed asks
+ * for nothing. The choice already released Hold when it was made, so a Hold on at the landing was
+ * pressed after it: Hold pauses automatic advance and does not take back a switch the performer
+ * asked for, so it stays on while the choice is armed.
+ */
+const armChosen = (state: PlaybackState, now: number, clock: Clock): PlaybackState => {
+  const { chosen } = state
+  const landed = { ...state, chosen: undefined }
+  if (chosen === undefined || chosen === state.current.clipId) {
+    return landed
+  }
+
+  const armed = choose(landed, chosen, now, clock)
+  return state.held === true ? { ...armed, held: true } : armed
+}
+
+const fireOrSlip = (state: PlaybackState, now: number, clock: Clock): PlaybackState => {
+  const { firing, next } = state
+  if (!firing || !next) {
     return state
+  }
+  // Freeze holds the switch as well as the picture, so the screen never names a clip nobody can see.
+  if (!next.ready || panicMode(state) === 'freeze') {
+    return firing.onBar ? { ...state, firing: { at: nextBarAt(clock, now), onBar: true } } : state
   }
   if (state.transition.kind === 'cut' || state.transition.bars === 0) {
     return complete(state)
@@ -133,9 +196,18 @@ const tick = (state: PlaybackState, now: number, clock: Clock): PlaybackState =>
 
   return {
     ...state,
-    fading: { from: state.current.slot, startedAt: state.firing.at, to: other(state.current.slot) },
+    fading: { from: state.current.slot, startedAt: firing.onBar ? firing.at : now, to: next.slot },
     firing: undefined,
   }
+}
+
+const tick = (state: PlaybackState, now: number, clock: Clock): PlaybackState => {
+  if (state.fading) {
+    const span = barDurationMs(clock.bpm, clock.beatsPerBar) * state.transition.bars
+    return now < state.fading.startedAt + span ? state : armChosen(complete(state), now, clock)
+  }
+
+  return state.firing && now >= state.firing.at ? fireOrSlip(state, now, clock) : state
 }
 
 /** Back returns through the free buffer, drops anything queued or armed, and keeps what is not about the clip (hold, panic). */
@@ -147,8 +219,8 @@ const back = (state: PlaybackState): PlaybackState => {
     return state
   }
 
-  // The control window re-loads the previous clip's code into that slot before asking the output to
-  // cut to it, so a history deeper than the two buffers can still be walked.
+  // The control re-loads the previous clip's code into that slot before asking the picture to cut
+  // to it, so a history deeper than the two buffers can still be walked.
   const returned: PlaybackState = {
     arrivedBy: { bars: 0, kind: 'cut' },
     current: { clipId: previous.clipId, slot: other(state.current.slot) },
@@ -164,17 +236,17 @@ const back = (state: PlaybackState): PlaybackState => {
   return returned
 }
 
-const goNow = (state: PlaybackState, now: number): PlaybackState => {
+const goNow = (state: PlaybackState, now: number, clock: Clock): PlaybackState => {
   // Mid-fade, "now" means finish it — a press that did nothing would be a silent
   // swallow, and the performer would press it again into a show that ignores them.
   if (state.fading) {
-    return { ...complete(state), held: false }
+    return { ...armChosen(complete(state), now, clock), held: false }
   }
   if (!canGoNow(state)) {
     return state
   }
 
-  return { ...state, firing: { at: now }, held: false }
+  return { ...state, firing: { at: now, onBar: false }, held: false }
 }
 
 export const reduce = (state: PlaybackState, event: PlaybackEvent, clock: Clock): PlaybackState => {
@@ -186,7 +258,19 @@ export const reduce = (state: PlaybackState, event: PlaybackEvent, clock: Clock)
         return state
       }
       // The queued clip always takes the buffer the current one is not using.
-      return { ...state, next: { clipId: event.clipId, slot: other(state.current.slot) } }
+      return { ...state, next: staged(state, event.clipId) }
+    }
+
+    case 'choose': {
+      return choose(state, event.clipId, event.now, clock)
+    }
+
+    case 'next-ready': {
+      return state.next && !state.next.ready ? { ...state, next: { ...state.next, ready: true } } : state
+    }
+
+    case 'unstage': {
+      return { ...state, firing: undefined, next: undefined }
     }
 
     case 'go': {
@@ -198,7 +282,7 @@ export const reduce = (state: PlaybackState, event: PlaybackEvent, clock: Clock)
 
       // Pressing Go is an explicit advance, so it releases Hold rather than leaving the show
       // paused after the one switch the performer asked for.
-      return { ...state, firing: { at: nextBarAt(clock, event.now) }, held: false }
+      return { ...state, firing: { at: nextBarAt(clock, event.now), onBar: true }, held: false }
     }
 
     case 'set-transition': {
@@ -214,7 +298,7 @@ export const reduce = (state: PlaybackState, event: PlaybackEvent, clock: Clock)
     }
 
     case 'go-now': {
-      return goNow(state, event.now)
+      return goNow(state, event.now, clock)
     }
 
     case 'hold': {

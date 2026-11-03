@@ -6,9 +6,8 @@
  * be put on screen.
  *
  * Still live, and deliberately so: M2 added the library and a track selector, and these are
- * what the control panel falls back to when the library is empty (`control.ts`'s default
- * `clips` and `startClipId`, and the panel's fixture buttons). Removing them would leave a
- * fresh install with nothing to press.
+ * what the stage falls back to when the library is empty (`control.ts`'s default `clips`,
+ * and `stage.ts`). Removing them would leave a fresh install with a black screen.
  *
  * They are fixtures, not library content — a registered clip is a D1 row, never one of these.
  * The example clips that ship to users (§18, M12) do not exist yet and will not live here.

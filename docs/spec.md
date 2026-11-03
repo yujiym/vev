@@ -4,11 +4,11 @@
 
 The specification: what vev is, and how it is meant to work. It is the authority the code answers to, and the document every milestone is read against.
 
-Status as of 2026-11-03: a show runs on localhost with rule-based candidates, dictionary steering and automatic transitions. AGENTS.md lists what is built and what is not. §17 lists what is still unverified; the items already settled say so.
+Status as of 2026-11-03: a show runs on localhost from one screen, with rule-based candidates, dictionary steering and automatic transitions. AGENTS.md lists what is built and what is not. §17 lists what is still unverified; the items already settled say so.
 
 ## 0. Overview
 
-vev is a web app for live VJ performance that chains saved visual clips (Hydra / textmode.js / ISF). A decision model suggests about three candidates for the next clip. By default the top candidate plays next, but the performer can click any candidate to choose it deliberately. Transitions between clips have defaults, and are changed automatically according to the structure of the track.
+vev is a web app for live VJ performance that chains saved visual clips (Hydra / textmode.js / ISF). A decision model suggests about three candidates for the next clip, shown small along the bottom of the picture. Choosing one outlines it, and it switches on the next bar. If nobody chooses, the track's next item or the top candidate is what Go plays. Transitions between clips have defaults, and are changed automatically according to the structure of the track.
 
 ### Background and references
 
@@ -40,8 +40,7 @@ vev is a web app for live VJ performance that chains saved visual clips (Hydra /
 - Three engines: Hydra, textmode.js (+ textmode.synth.js), ISF
 - Clip library (registration, automatic annotation, thumbnails)
 - Tracks (ordered clips): create, save, share via public URL
-- Live screen: current clip, next clip, three candidates, transitions
-- Separate output window (projector) and control window
+- The stage: one screen, the projected picture with its controls over it (§12), and three candidates, transitions
 - Audio input (FFT) and BPM (tap tempo)
 - Candidate generation: embedding search → re-ranking by a decision model
 - Steering chat: a standing direction, in words, that biases which clips are offered (§8.6)
@@ -86,15 +85,13 @@ vev is a single Cloudflare Worker (Void Pages with Svelte, plus Hono for the API
 
 ```
 ┌──────────────────────── Browser ─────────────────────────┐
-│  Control UI (Svelte)              Output Window (projector)│
-│   ├ Track timeline                 └ Compositor canvas    │
-│   ├ Now / Next                          ▲                 │
-│   ├ Candidates x3                       │ BroadcastChannel│
-│   ├ Prompt input                        │ (state sync)    │
-│   └ Transition / Panic                  │                 │
+│  The stage (Svelte): one page, at /                       │
+│   ├ Compositor canvas, filling the viewport               │
+│   └ Over it: control row, candidates x3, info overlays,   │
+│     panels (playlist, library, new clip, tracks, chat)    │
 │                                                           │
 │  Playback Engine (framework-agnostic TS)                  │
-│   ├ Scheduler (bar-quantized)                             │
+│   ├ Reducer + scheduler (bar-quantized), one frame loop   │
 │   ├ Engine adapters: hydra / textmode / isf               │
 │   ├ Compositor (Hydra: o0 = mix(o1, o2))                  │
 │   └ Audio analyzer (FFT, energy, BPM)                     │
@@ -128,14 +125,13 @@ vev is a single Cloudflare Worker (Void Pages with Svelte, plus Hono for the API
 └───────────────────────────────────────────────────────────────┘
 ```
 
-### Separate output window
+### One screen
 
-- The control UI opens the output window with `window.open()`; it is made fullscreen on the projector.
-- **The show renders only in the output window** (no duplicate WebGL contexts for playback).
-  - **Registration is the one exception, and it is transient.** The registration screen (§11) has to run a clip to validate it and to record its thumbnail, and only a browser can do that (§11.1). It therefore mounts a transient `HydraCompositor` of its own — in fact two in sequence and never at the same time: the probe's, disposed the moment the probe returns (pass or fail), then the recording's, which renders the thumbnail, samples the palette and is **disposed immediately** in a `finally`, before the clip is saved. The cap that matters is §6.5's on _live_ contexts; a context that exists for a few seconds on a screen where nothing is playing does not compete with the show. Nothing else in the control UI renders: the control window's monitor of the output is downscaled frames, not a second context.
-- Control ↔ output state sync uses `BroadcastChannel` (same browser, no network).
-- The control UI shows a low-resolution monitor of the output (downscaled frames sent periodically, or `captureStream`).
-- Running control and output on different machines (Durable Objects + WebSocket) is out of MVP scope.
+- The stage at `/` is the picture and the control surface at once, on one display, with a one-click browser fullscreen button. The audience sees the UI ([ADR 0012](adr/0012-one-screen-stage.md)).
+- **The reducer decides, and the picture follows on the same frame.** One frame loop advances the reducer, the track and the compositor. `dispatch` in `client/control.ts` reduces an event and projects the difference: a load when the staged clip changes, a `switchTo` when a switch fires. Nothing else starts a switch, so nothing can reach the screen early.
+- **The show renders in one context, and registration is the one exception, and it is transient.** The new-clip panel (§11) has to run a clip to validate it and to record its thumbnail, and only a browser can do that (§11.1). It mounts a transient `HydraCompositor` of its own, in fact two in sequence and never at the same time: the probe's, disposed the moment the probe returns (pass or fail), then the recording's, which renders the thumbnail, samples the palette and is **disposed immediately** in a `finally`, before the clip is saved. Unlike the two-window design this replaced, something IS playing beside it: both share the show's GPU and thread, so they refuse while a switch is armed or fading, warn at any other time, and fail into a message in the panel without touching the live context. How much a probe or recording costs the picture is unmeasured (§17).
+- Candidate thumbnails are paused until hovered or focused (§6.1), because each playing one is another video decode on the show's GPU.
+- Running the controls on a second machine (Durable Objects + WebSocket) is out of MVP scope.
 
 ### Local mode
 
@@ -191,7 +187,7 @@ vev/
 
 - `apps/app` is one Void package: `vp build` produces the Worker and the browser assets together, and `void deploy` needs no earlier step (ADR 0011, which supersedes ADR 0002). Worker code lives in `src/`, `middleware/` and `queues/`; browser code in `client/` and `pages/*.svelte`, with a `tsconfig.json` of its own, because the two halves need different globals.
 - Every page has a `.server.ts` companion with `ssr = false`, so the Worker serves a client-mounted shell and renders no component. `pages/[...path]` stands in for the old SPA fallback: an unmatched path that names no file still reaches the app, and one that does name a file answers 404. `middleware/01.server.ts` only routes `/api/*` and `/media/*` to Hono; `routing.notFound` stays `none`.
-- `packages/engines` is browser-only; `hydra-synth` is imported dynamically from the output-window and registration code only, and the Worker bundle (`dist/ssr`) must not contain it.
+- `packages/engines` is browser-only; `hydra-synth` is imported dynamically from the stage and the registration panel only, and the Worker bundle (`dist/ssr`) must not contain it.
 
 ---
 
@@ -342,7 +338,7 @@ interface EngineAdapter {
   - `o1`: current clip (A)
   - `o2`: next clip (B), used during transitions and for preloading
   - `o3`: spare (intermediate buffer for transitions, etc.)
-- **No live previews of the three candidates.** Candidate cards show thumbnail videos (saves buffers and GPU).
+- **No live previews of the three candidates.** Candidate cards show thumbnail videos, paused on their first frame until hovered or focused (saves buffers and GPU).
 - Clip code is normalized at ingestion (§11). At runtime `.out()` is rewritten to `.out(o1)` / `.out(o2)`.
 - Clips that use several outputs internally (`deps.outputsUsed.length > 1`) are marked `isolated`. They run in a separate Hydra instance (`makeGlobal: false`) on their own canvas, fed back through an `s` source. This requires code rewriting and may be excluded in the MVP (show a warning in the library).
 - The Hydra `bpm` global is synced with the scheduler.
@@ -371,6 +367,7 @@ interface EngineAdapter {
 
 - Browsers limit the number of WebGL contexts. At most these exist at once: main Hydra + current external engine + next external engine.
 - `prepare()` the next clip only once it is confirmed; `dispose()` the previous clip after the transition finishes.
+- Registration's transient contexts count against this too, now that they run beside the show (§3). A browser that hits its context cap drops the oldest context, and the live one is the oldest, which is why each transient one is released with `loseContext` rather than left to garbage collection.
 
 ---
 
@@ -378,11 +375,11 @@ interface EngineAdapter {
 
 ```
 [A playing on o1]
-   │  Right after A starts: request candidates (§8) → show 3, set #1 as "Next"
-   │  User clicks a candidate → replaces "Next"
-   │  Once "Next" is set: prepare() B and preload it into o2 (not visible)
+   │  Right after A starts: request candidates (§8) → show 3
+   │  The track's next item, else candidate #1, is staged: what Go would play, preloaded into o2 (not visible)
    ▼
 [Transition starts] — one of:
+   - User chooses a candidate: it is loaded into o2, outlined, and switches on the next bar, with no Go
    - A has used up its bars (auto-advance)
    - User presses "Go" (runs at the next bar)
    - User presses "Go now" (immediate)
@@ -392,12 +389,18 @@ interface EngineAdapter {
 [Done] B is promoted to o1 (or buffer roles are swapped), A is disposed
 ```
 
+- **Choosing a different clip before the bar replaces the choice and keeps the bar. Choosing the same clip again takes the choice back:** nothing switches, the outline goes, and the picture carries on. Next falls back to the track's own next item, or candidate #1 after the track's end.
+- **A switch never fires onto a slot that has not rendered.** Hydra samples a buffer from before its last draw, so a slot needs two frames before anything shows it: a load and a cut in one frame shows two frames of black, or of the clip the slot last held (measured, ADR 0012). A switch whose clip is not ready at its bar slips to the following bar. Go now waits only for the render, and its fade starts on the frame it fires. A choice made too close to the bar line therefore costs a bar, and never a black frame.
+- **A choice during a fade is held**, and arms the bar after the fade lands, because the free slot is the fade's own target until then. Choosing again during the fade replaces it, and choosing the same clip again drops it, so nothing is armed at the landing. Go now over a fade finishes the fade and arms the held choice.
+- **A clip that will not compile costs its own switch.** The choice is dropped, the screen says why, and the show keeps what it has. That includes a shader Hydra swallowed the error for: `load` checks that the clip built a command and that WebGL links its program (§17), so a clip that compiles in no way never reaches a slot.
+- **Back goes one at a time.** It reloads the previous clip into the free slot and cuts once that slot has rendered. A clip staged in that window waits for the cut before it loads, and a second Back is refused until the first has cut, a matter of two frames.
+- **Freeze holds an armed switch**, so what is named on screen is what is showing; it fires on the first bar after the freeze lifts. Blackout does not hold one.
 - **All switches are quantized to the start of a bar** (except "Go now").
 - Auto-advance can be toggled. When off, A keeps playing until "Go".
-- **Hold**: extend the current clip (pause auto-advance).
+- **Hold**: extend the current clip (pause auto-advance). It does not take back a switch the performer already armed or held through a fade: that still fires, and Hold stays on.
 - **Back**: return to the previous clip.
 - **Panic**: blackout / freeze / safe clip (a pre-selected, always-fine clip).
-- If the track has a next item, it is the initial "Next"; candidates are shown as alternatives. After the end of the track, the #1 candidate becomes the default.
+- If the track has a next item, it is the initial "Next"; candidates are shown as alternatives, and a chosen one takes that item's place. After the end of the track, the #1 candidate becomes the default.
 
 ---
 
@@ -494,11 +497,11 @@ interface DecisionSettings {
 - A **response normalizer** per kind converts every provider's response into one internal shape (Cloudflare wraps results in an envelope; field names for probabilities/confidence may differ — verify each).
 - Question-type names follow System One (`choice`, `score`, `noul`); clients map them if a provider uses other names.
 
-#### Settings screen (`/studio/settings/decision`)
+#### Settings panel (on the stage)
 
 - List of providers: add / edit / enable / disable / delete, drag to reorder the chain.
 - **Test button**: sends a fixed sample request, shows latency, the normalized answer, and raw response.
-- Profile switch (online / local) is also available as a toggle on the live screen.
+- Profile switch (online / local) is also available as a toggle in the control row.
 - Secrets:
   - Preferred: Worker secrets set with `wrangler secret put`; the config stores only the secret name.
   - For secrets added from the UI: stored in D1 encrypted with AES-GCM using the `SETTINGS_ENCRYPTION_KEY` Worker secret. **Secrets are never returned to the client** (the UI shows only "set / not set").
@@ -523,7 +526,7 @@ These two structures are the one offline mechanism, and it runs in two places. T
 
 The performer steers the decision model in words. A chat message becomes a **direction**: a standing instruction that keeps applying until it is replaced or cleared, where a one-shot prompt affected a single request. The chat is §8.2's prompt input grown up — there is no second input beside it.
 
-**The chat steers; it never acts.** It changes which clips are offered and how they rank. It never starts a transition, holds, skips, or moves a parameter: those stay on the buttons and keys of §12.1, where a misread sentence cannot reach the output (§0, principle 1).
+**The chat steers; it never acts.** It changes which clips are offered and how they rank. It never starts a transition, holds, skips, or moves a parameter: those stay on the buttons and keys of §12, where a misread sentence cannot reach the output (§0, principle 1).
 
 ```ts
 interface Direction {
@@ -579,7 +582,7 @@ Unless `TrackItem.transitionLocked` is true, choose in this order:
 3. The decision provider's `transition` answer (when rules don't decide, or as a weighted input)
 4. `Track.defaultTransition`
 
-- The automatically chosen transition is shown in the UI and can be changed with one click.
+- The automatically chosen transition is shown on the control row's transition button, and one click changes it.
 - If the same transition was used three times in a row, prefer a different one.
 
 ---
@@ -634,12 +637,13 @@ Input (pasted code / URL / ISF file)
 
 | Step | Runs in | Why |
 | --- | --- | --- |
-| Normalization / dependency analysis | Browser (registration screen) and Worker, via `packages/ingest` | Instant preview on registration; re-validated on save |
-| Validation probe / thumbnail recording / palette and stills sampling | Browser (registration screen) | Needs WebGL; Workers cannot render. The palette is read out of the recorded frames (ADR 0005), so it reaches the server with the thumbnail, not with the annotation. The stills are copied in the same render tick and uploaded separately (ADR 0010) |
+| Normalization / dependency analysis | Browser (new-clip panel) and Worker, via `packages/ingest` | Instant preview on registration; re-validated on save |
+| Validation probe / thumbnail recording / palette and stills sampling | Browser (new-clip panel, beside the live picture, §3) | Needs WebGL; Workers cannot render. The palette is read out of the recorded frames (ADR 0005), so it reaches the server with the thumbnail, not with the annotation. The stills are copied in the same render tick and uploaded separately (ADR 0010) |
 | Annotation (typed questions + description) | Queue consumer (Worker) | Slow, so async; updates the clip when done. Reads the stills from R2. Absent in local mode — see §11's local-mode note |
 | Embeddings / neighbor table | Queue consumer (Worker) | Workers AI + Vectorize |
 
-- The registration screen runs the clip for a few seconds; only clips that render without errors can be saved.
+- The new-clip panel runs the clip for a few seconds; only clips that render without errors can be saved.
+- **Register before the doors open.** The probe and recording share the show's GPU and thread. They refuse while a switch is armed or fading and warn otherwise, and a failed or lost context costs only that attempt (§3).
 
 ### 11.2 Room for generated clips
 
@@ -657,40 +661,43 @@ Generating clip code with a model is a later feature (§1), but a few MVP decisi
 
 ## 12. UI
 
-### 12.1 Control screen
+### 12.1 The stage
+
+There is one screen, at `/`: the picture fills the viewport and everything else sits over it. Normally only the control row and the candidate cards are visible, and the audience sees them. Every overlay stays usable during Blackout and Freeze, and every panel leaves the control row uncovered, so panic is one click away at all times.
 
 ```
-┌────────────────────────────────────────────────────────┐
-│ [Track: xxx]  BPM 128 [TAP] [Downbeat]  Auto▶ ON        │
-│ Decision: [online ▼]  (cf-jev ●)            [Output↗]   │
-├───────────────────────────┬────────────────────────────┤
-│  NOW (output monitor)      │  NEXT                      │
-│  clip title / engine       │  clip title / engine       │
-│  ████████░░ 6/8 bars       │  transition: modulate 1bar │
-│  [Hold] [Back]             │  [Change▼] [Go] [Go now]   │
-├───────────────────────────┴────────────────────────────┤
-│  Track timeline  ■■■■□□□□  (with section labels)        │
-├────────────────────────────────────────────────────────┤
-│  [Chat]  steering: "darker, slower"  (llm)     [Clear]  │
-├──────────────┬──────────────┬──────────────────────────┤
-│ ★Candidate 1 │ Candidate 2  │ Candidate 3               │
-│ [thumbnail]  │ [thumbnail]  │ [thumbnail]               │
-│ title/engine │ title/engine │ title/engine              │
-│ reason       │ reason       │ reason                    │
-└──────────────┴──────────────┴──────────────────────────┘
-          [Blackout] [Freeze] [Safe clip]
+┌────────────────────────────────────────────────────────────┐
+│[Hold][Back][Go][Go now][Crossfade 2 bars] [Blackout][Freeze]│
+│[128 BPM][TAP][Auto][● rule ranking] [Menu]                  │
+│ Next: Drift in 1.4s            (notices, only when needed)  │
+│                                                             │
+│                        the picture                          │
+│                                                             │
+│ ┌─────────┐┌─────────┐┌─────────┐                           │
+│ │1 thumb  ││2  1.4s  ││3 thumb  │      title — author (lic.)│
+│ │title    ││(outline)││title    │           Source (commit) │
+│ └─────────┘└─────────┘└─────────┘                           │
+└────────────────────────────────────────────────────────────┘
 ```
 
-- ★ = plays next by default. Clicking another candidate replaces "Next".
-- Decision indicator: active profile and provider, with a status dot (green / fallback / offline).
-- Keyboard: `1`/`2`/`3` select candidate, `Space` Go, `Shift+Space` Go now, `H` Hold, `B` Blackout, `Esc` Freeze, `C` open the chat. While the chat panel has focus every single-key shortcut is suspended — typing goes to the chat — and `Esc` closes the panel instead of freezing.
-- The chat panel (§8.6) opens over the candidates. The control row always shows the standing direction and how it was interpreted (`dictionary` / `llm`), with a one-click Clear; sending a message needs no panel.
+- **Candidates.** Up to three cards along the bottom edge: title, engine, a paused thumbnail. `reason` and `source` show on hover, unreviewed clips are marked. An outline means the clip will switch by itself, with a countdown to its bar. A dashed border marks what Go would play. A failed request keeps the last cards, marked stale. A chosen card stays on screen through the answer a landing asks for. Clicking the outlined card again, or pressing its key again, takes the choice back. Cards in the Menu hides them; the keys still choose, and a notice names the armed clip.
+- **The row** keeps only what a performer needs in the moment: Hold, Back, Go, Go now, the transition, Blackout, Freeze, TAP with the tempo, Auto and the decision indicator, then Menu. It is one line from 1280 down to about 730 wide (it fits at 960 and wraps at 640), and wraps onto a second line below that, with the panels and overlays starting under its last line. Buttons are near-opaque, and a disabled one keeps light text, so the row stays readable over a white clip.
+- **Menu.** One button holding the panels (Playlist, Library, New clip, Tracks, Chat), what is drawn over the picture (Cards, Credit, Code, Now, Keys) and Fullscreen, each with its state in words (`open`/`closed`, `on`/`off`). It opens below the row, never over Blackout or Freeze, and a choice, a click elsewhere or `Esc` closes it. Choosing from it is how every panel opens.
+- **Decision indicator.** Which layer produced the top candidate, with a status dot (green / fallback / stale).
+- **Keyboard.** `1`/`2`/`3` choose a candidate, `Space` Go, `Shift+Space` Go now (or finish a fade), `H` Hold, `B` Blackout, `Esc` Freeze, `C` the steering chat. `Space` still means something: it plays what is staged, which is how a track starts, and how a track runs with Auto off. Typing in a field suspends every single-key shortcut, and a button focused inside a panel keeps its own `Space`. `Esc` closes the menu, then a panel, before it means Freeze, wherever the focus is.
+- **Panels** slide over the right side with the show running behind them, one at a time: Playlist (choose or leave a track, where the show is in it, with section labels), Library, New clip, Tracks, the track editor, and the steering chat (§8.6) with its standing direction and Clear. They are panels, not routes, because navigating would unmount the show. The new-clip and track-editor forms stay mounted once opened, so closing one does not lose what was typed.
 - The "reason" text is generated by rules (tag match, energy, etc.), not by the decision model.
 
-### 12.2 Output window
+### 12.2 Info overlays
 
-- Rendering only, no UI.
-- Credit overlay (toggle): small "title — author (license)" in a corner.
+Semi-transparent, off by default, each switched on from the Menu:
+
+- Credit: small "title — author (license)" in a corner (§14.2).
+- Code: the current clip's code.
+- Now: what is playing, what is next, its transition and where it came from, bars elapsed, bar phase.
+- Keys: the key map.
+
+The AGPL source link is always on screen, in the corner (§14.1).
 
 ### 12.3 Other screens
 
@@ -698,12 +705,15 @@ Generating clip code with a model is a later feature (§1), but a few MVP decisi
 - Track editor: drag to reorder, section labels, per-transition settings and locks.
 - Settings: decision providers (§8.4), audio device, defaults (transition, K, timeouts), offline preparation.
 
+All of them are panels on the stage.
+
 ---
 
 ## 13. Public URLs, permissions, security
 
 - Authentication uses Cloudflare Access.
-  - Protected: `/studio/*` (live, library, editor, settings) and all write `/api/*` routes, plus `/api/candidates` and `/api/settings/*`.
+  - Protected: `/` (the stage, which holds live, library, editor and settings) and all write `/api/*` routes, plus `/api/candidates` and `/api/settings/*`.
+  - **What is deployed differs from this list.** On 2026-11-03 an unauthenticated request to `vev-preview.0x7.sh` got a redirect to the Access login for `/`, `/studio`, `/output`, `/api/health`, `/media/x` and `/t/x` alike: the Access application covers the whole hostname, not a list of paths. So the stage at `/` is protected there with no policy change, and the public paths below are not public yet (§17). The policy lives outside this repository.
   - The Worker also verifies `Cf-Access-Jwt-Assertion` (defense in depth against Access misconfiguration).
   - Public: `/t/<slug>` (viewing) and `GET /api/public/tracks/:slug`.
 - Tracks can be published at `/t/<slug>` (private / unlisted / public). Public track JSON is cached in KV.
@@ -717,7 +727,7 @@ Generating clip code with a model is a later feature (§1), but a few MVP decisi
   - Public pages only run code of clips referenced by the track, fetched from the library.
 - **Local mode has no Cloudflare Access.** The Worker binds to `127.0.0.1` only, and a request that does not come from loopback is never treated as the owner. Local mode is never served on a LAN address or `0.0.0.0` (§15.3).
 - Chat text leaves the Worker only for the configured interpretation provider (§8.6), on the same owner-only, rate-limited path as `/api/candidates`. In local mode nothing leaves the machine.
-- **A preview deployment is a second front door.** Cloudflare Access policies bind to hostnames, so a policy covering the custom domain does not cover a `*.workers.dev` preview or version URL: publishing one exposes `/studio/*` and the owner `/api/*` routes to anyone holding the link. A reachable deployment is only acceptable when its hostname is covered by the Access policy, or when it carries no owner routes at all. The same applies to bindings — a preview version runs against whatever environment it was uploaded with, so a preview wired to production bindings can write to production data. Previews therefore take their own environment, never the production one.
+- **A preview deployment is a second front door.** Cloudflare Access policies bind to hostnames, so a policy covering the custom domain does not cover a `*.workers.dev` preview or version URL: publishing one exposes the stage and the owner `/api/*` routes to anyone holding the link. A reachable deployment is only acceptable when its hostname is covered by the Access policy, or when it carries no owner routes at all. The same applies to bindings — a preview version runs against whatever environment it was uploaded with, so a preview wired to production bindings can write to production data. Previews therefore take their own environment, never the production one.
 - Decision-provider secrets never leave the Worker (§8.4).
 
 ---
@@ -781,7 +791,7 @@ Local mode is how vev runs at a venue: the same artifact as the deployed one —
 - **The steering chat runs dictionary-only** (§8.6): no interpretation provider is reachable, so a direction comes from the tag dictionary alone and the UI says so. Nothing else about the chat changes.
 - **The decision profile comes from the environment**, not the live toggle: local mode starts on the `local` profile, so the chain never begins with a provider that needs the internet. A local Kev shares one machine's GPU with 1080p60 rendering (§17).
 - **Auth**: the invariant is in §13. `SETTINGS_ENCRYPTION_KEY` must exist locally (`.dev.vars`), or provider secrets copied by `sync:pull` cannot be decrypted.
-- **Secure context**: `http://localhost` is a secure context, so `getUserMedia`, the Service Worker and `BroadcastChannel` work without TLS. A LAN address is not, so control and output windows stay on the one machine — which §3 requires anyway.
+- **Secure context**: `http://localhost` is a secure context, so `getUserMedia`, the Service Worker and fullscreen's Keyboard Lock work without TLS. A LAN address is not, which is one more reason the stage stays on the one machine (§3).
 - **Before the show**: `pnpm sync:pull` copies the deployed D1 / R2 data into the local state, and "Prepare offline" (§15.2) fills the browser caches for the track.
 - **After the show**: `pnpm sync:push` sends the locally recorded session events to the deployed D1; without it local sessions never reach the dataset in §16.
 
@@ -839,8 +849,8 @@ Local mode is how vev runs at a venue: the same artifact as the deployed one —
 - [ ] **TypeSafe labels image input beta, and nothing yet shows how it fails.** The only failure seen is the dimension refusal above. `annotateClip` treats any failed or malformed call with frames the same way: it logs which evidence was used and retries once with the code alone. Whether image input is billed at a different rate than the 450 input tokens an image suggests is not known.
 
 - [ ] **`ownerId` is hard-coded, because identity is unanswered.** §13 assumes a single owner and Cloudflare Access decides only _whether_ a request is that owner, never _which_ — so `apps/app/src/routes/tracks.ts` sets `OWNER_ID = 'owner'` on every track it creates rather than deriving identity from the Access assertion. That is the honest choice today: `apps/app/src/access.ts` only checks the assertion is _present_, so anything derived from it would be a guess dressed as a fact. Two places move the day a second owner exists — that constant, and the access guard, which would have to decode and verify the assertion to name anyone. A third thing is simply missing: the `clips` table has no owner column at all, so clips are not merely single-owner, they are unowned. What would settle it: full Access JWT verification (fetch and cache the team's JWKS from `ACCESS_TEAM_DOMAIN`, check signature, issuer, audience and expiry against `ACCESS_AUD` — both vars are already wired), then a decision about whether clips are a shared library or per-owner, which is a migration either way.
-- [ ] **The browser drivers are deliberately outside `pnpm test` and CI, and their visual evidence is not an assertion.** `apps/app/e2e/` holds Playwright drivers for the library, the track editor and the control panel; running them found two real defects no unit test had. They are not in the automated gate on purpose — they need a running `pnpm live` and, on a fresh machine, a few-hundred-megabyte Chromium download, and Playwright is not a dependency of this repository (`npx --package` supplies it for the life of the command). The cost is that nothing re-runs them: a regression in the `$effect` that refetches on a filter change, or in a fade refusal reaching the screen, is caught only when a human remembers to run the drivers. Worse, one of the things they were written to show cannot be asserted at all: `gl.readPixels` on the output canvas returns all zeros because the context is created with `preserveDrawingBuffer: false`, so the crossfade captures are screenshots a human has to look at, not a comparison a script can fail on. And SwiftShader means nothing they measure speaks to frame rate on a projector (see the frame-budget item). What would settle it: either a CI job that installs Chromium and runs them (paying the download, accepting the software-rendering caveat), or an output-window build flag that turns `preserveDrawingBuffer` on under test so a blend can actually be asserted.
-- [ ] **The Cloudflare Access guard has never been round-tripped.** `requireAccessAssertion` is unit-tested in `apps/app/test/access.test.ts` against synthetic headers, and that is the whole of its evidence. It has not been exercised against real Access: local mode has none by design (§15.3, and the guard disables itself when `VEV_MODE === 'local'`), and the deployed preview — which _is_ behind Access as of M2 — has not been driven through a login and out the other side. So the pair "Access's edge allows the request" and "the Worker sees a non-blank `Cf-Access-Jwt-Assertion` on it" is assumed, not observed. Related and still absent: there is no Access **bypass policy for `/api/health`**. The Worker names `/api/health` as its only public path, but Access intercepts at the edge first, so the deployed preview's health endpoint redirects to the login page and cannot be curled — which is why CI is not pointed at it and why checking a promoted version's `commit` means opening a browser. What would settle both: a manual browser round trip through Access to `/studio`, confirming an owner route answers and recording what the Worker saw; and an Access bypass (or service-token) policy scoped to `/api/health` alone, then `curl` against it from outside.
+- [ ] **The browser drivers are deliberately outside `pnpm test` and CI, and their visual evidence is not an assertion.** `apps/app/e2e/` holds Playwright drivers for the library, the track editor and the control panel; running them found two real defects no unit test had. They are not in the automated gate on purpose — they need a running `pnpm live` and, on a fresh machine, a few-hundred-megabyte Chromium download, and Playwright is not a dependency of this repository (`npx --package` supplies it for the life of the command). The cost is that nothing re-runs them: a regression in the `$effect` that refetches on a filter change, or in a fade refusal reaching the screen, is caught only when a human remembers to run the drivers. Worse, one of the things they were written to show cannot be asserted at all: `gl.readPixels` on the stage's canvas returns all zeros because the context is created with `preserveDrawingBuffer: false`, so the crossfade captures are screenshots a human has to look at, not a comparison a script can fail on. And SwiftShader means nothing they measure speaks to frame rate on a projector (see the frame-budget item). What would settle it: either a CI job that installs Chromium and runs them (paying the download, accepting the software-rendering caveat), or a build flag that turns `preserveDrawingBuffer` on under test so a blend can actually be asserted.
+- [ ] **The Cloudflare Access guard has never been round-tripped.** `requireAccessAssertion` is unit-tested in `apps/app/test/access.test.ts` against synthetic headers, and that is the whole of its evidence. It has not been exercised against real Access: local mode has none by design (§15.3, and the guard disables itself when `VEV_MODE === 'local'`), and the deployed preview — which _is_ behind Access as of M2 — has not been driven through a login and out the other side. So the pair "Access's edge allows the request" and "the Worker sees a non-blank `Cf-Access-Jwt-Assertion` on it" is assumed, not observed. Related and still absent: there is no Access **bypass policy for `/api/health`**. The Worker names `/api/health` as its only public path, but Access intercepts at the edge first, so the deployed preview's health endpoint redirects to the login page and cannot be curled — which is why CI is not pointed at it and why checking a promoted version's `commit` means opening a browser. What would settle both: a manual browser round trip through Access to `/`, confirming an owner route answers and recording what the Worker saw; and an Access bypass (or service-token) policy scoped to `/api/health` alone, then `curl` against it from outside.
 - [ ] **A clip registered without a thumbnail has no palette, and there is no way to add one afterwards.** `palette` is sampled from the frames the thumbnail recording actually rendered and is uploaded with that recording (`POST /api/clips/:id/thumbnail?palette=...`), which is what makes it ground truth rather than a guess (ADR 0005). The consequence is that the two travel together: skip the recording and the row has neither. The endpoint itself is not the obstacle — it is a normal route and takes a recording for any already-registered clip — but nothing in the UI reaches it outside the registration sequence, so in practice the only way to give an existing clip a palette is to register the clip again. What would settle it: a library action that re-runs the recording for an existing clip against the same endpoint. Until then, anything reading `palette` must handle its absence, and a clip with no thumbnail is a clip the library cannot show a colour for.
 - [ ] **Three things M2 produces with no consumer in M2: `derivedFrom`, five annotated fields, and one flag's advice.** Recorded together because they are one shape: something the milestone produces that nothing in the milestone reads or offers. (a) `derivedFrom` has a column, a `nullsToUndefined` entry and a schema field, is absent from both the registration and the patch schema, and has no writer anywhere — §5 describes it as the provenance link between a clip and the one it was derived from, which nothing yet creates. (b) Five of the seven annotated fields — `description`, `motion`, `density`, `layerHint` and `palette` — reach no screen: `clipSummarySchema` carries none of them and no `.svelte` file in the repository mentions any, so only `energy` and `tags` are visible. Defensible, since the five are M3's decision-engine inputs, but it means the annotator's output cannot be checked by looking at the app — which matters more than usual given that no annotation has ever actually run (see the credits item above). (c) The `annotation-failed` flag's detail reads "Re-run it, or fill the fields in by hand", and M2 implements neither: `enqueueAnnotation` has exactly one caller (registration) and nothing in the web app issues a clip PATCH. The flag's tone distinction — attention versus waiting — is right and worth keeping; it is the advice that names actions nobody can take. What would settle all three is the same milestone: M3's review queue gives `reviewed` its writer, gives a person somewhere to see and correct the annotated fields, and is the natural home for a re-annotate action. Until it exists, the flag should say what M2 actually offers.
 - [ ] **Both annotation timeouts are guesses.** `JEV_TIMEOUT_MS` is 30s and `DESCRIPTION_TIMEOUT_MS` is 20s (`apps/app/src/ingest/annotate.ts`). They exist for a real reason — a call that never resolves is the one failure mode that does NOT end in `annotationStatus: 'failed'`: the consumer never acks, the queue redelivers until `max_retries` is spent, and the clip is silently left `pending`, a state nothing in the UI distinguishes from "annotation hasn't run yet". Whether Workers AI caps a hung call server-side is undocumented, and a defence resting on someone else's undocumented timeout is not a defence. But the _numbers_ are picked to be an order of magnitude above the only inference ever observed on this account (the `@cf/qwen` probe answered in well under a second) while keeping the worst case — two attempts, each a jev call plus a description call — near 100 seconds, comfortably inside a queue consumer's budget. No jev call has ever completed, so its 30s is bounded by nothing measured at all. What would settle them: log the observed duration of every annotation call once credits land, and set each timeout from the observed tail rather than from an order-of-magnitude guess. **Update 2026-11-03:** credits are loaded and `annotateClip` now returns `jevMs`, which `consume.ts` logs with `evidence` on every success. The only durations seen so far are the `cf ai run` calls of that day, about 2.7 seconds wall clock for a request with three images, through the CLI and not the binding, so the 30 seconds is still unmeasured against the tail. A clip with stills still makes at most two jev calls (the call with frames replaces the first code-only attempt), plus up to 10 seconds loading the stills from R2, so the worst case stays near 90 seconds.
@@ -849,23 +859,36 @@ Local mode is how vev runs at a venue: the same artifact as the deployed one —
 - [x] **Jev through the Worker's `AI` binding: answered on `vev-preview`, 2026-11-03.** The binding returned no top-level `answers`, and reading `result.answers` fixed it, so it wraps the object as the CLI does. A clip with stills reached `annotationStatus: ok` from frames plus code in 1292ms of jev time, and one without from code in 970ms. Each clip was annotated once.
 - [ ] **Whether §8.4's 800ms timeout holds with a full shortlist.** Six `POST /api/candidates` calls on `vev-preview` all came back `source: decision`, in 0.36-1.02s end to end through `cf access curl`, but with K = 1. Annotation calls took 970-1292ms, which suggests a larger K could exceed 800ms and fall back to the rule ranking, visible only through `source`. What would settle it: repeat with 20 clips and log the route's jev time.
 - [ ] **The rule ranking's weights and two constants are unmeasured.** `rankByRules` weights tag match 0.5, energy closeness 0.3 and unplayed history 0.2, renormalised when a direction gives no tags; a clip with no annotation scores 0.5 on energy so a fresh registration is not always last. `filterCandidates` keeps the most recent 5 clips out (`RECENCY_WINDOW`) and relaxes that only when fewer than 3 candidates remain (`MIN_CANDIDATES`). None of these numbers comes from a real library or a performer's choices, because the logging that would supply them (§16) has not shipped yet. What would settle them: fit the weights against the `candidates_shown` / `candidate_selected` pairs a real set produces, and check the recency window against how often a performer wanted the clip they had just played.
-- [ ] **The control screen leaves five pieces of §12.1 out.** _Safe clip_ (§7, §12.1): the panic row has Blackout and Freeze only, because "a pre-selected, always-fine clip" needs a place to be chosen (a track field? a setting?) and §5 has none. The _output monitor_ in NOW is a title, engine and bar progress, not a picture, because mirroring the output would mean a second compositor or `captureStream` (see the sandboxed-renderer item above). _Audio input_ (§10) and _session logging_ (§16) are not built, so the chat messages and direction changes §8.6 says are logged are not, and nothing records which candidate the performer chose after a direction. `[Downbeat]` does not exist either: a TAP sets the downbeat and nothing else does, so a performer cannot re-align the bar without re-tapping. What would settle them: a `safeClipId` on `Track` or in settings, an agreed monitor mechanism, and the §16 event writer.
-- [ ] **Hold, Back and panic are decisions the spec did not make.** Built as: _Hold_ toggles and is released by Go or Go now, and survives a switch landing and a Back; _Back_ cuts to the previous clip through the free buffer, drops anything queued or armed, and is refused mid-fade; _Blackout_ and _Freeze_ toggle against each other, are not quantised to a bar (a panic press must be visible on the next frame), and travel to the output on their own `panic` message, re-sent on `hello` so a projector reloaded mid-blackout comes back black. Freeze stops the compositor, so a switch armed before it does not complete behind it; Blackout keeps rendering underneath so the picture is current when lifted. Hold only stops _auto-advance_; there is no "extend by N bars". What would settle them: a performer using Back after a Go, and a freeze held across a switch's bar.
-- [ ] **All live state lives in the control window, and reloading it forgets it.** The reducer state, the track cursor, the candidates, the standing direction, the history sent to the decision layer, the recent transitions and panic all die with the tab. The output window recovers from its own reload (the `hello` handshake); the control window does not, so a reload mid-set puts the control screen back at its first clip while the output keeps showing whatever it last was. That follows from the code (nothing is persisted and nothing is sent on a control load); no browser driver reloads the control window yet. §0 principle 2 says the show must not stop, and it does not, but the two windows then disagree. What would settle it: persist the control state (`sessionStorage`, or the §16 session once it exists) and replay it into the output on load.
+- [ ] **The stage leaves four pieces of §12 out.** _Safe clip_ (§7): the panic buttons are Blackout and Freeze only, because "a pre-selected, always-fine clip" needs a place to be chosen (a track field? a setting?) and §5 has none. _Audio input_ (§10) and _session logging_ (§16) are not built, so the chat messages and direction changes §8.6 says are logged are not, and nothing records which candidate the performer chose after a direction. `[Downbeat]` does not exist either: a TAP sets the downbeat and nothing else does, so a performer cannot re-align the bar without re-tapping. The old _output monitor_ has no reason to exist now: the picture is the screen. What would settle them: a `safeClipId` on `Track` or in settings, and the §16 event writer.
+- [ ] **Hold, Back and panic are decisions the spec did not make.** Built as: _Hold_ toggles and is released by Go, Go now or a choice, and survives a switch landing and a Back; _Back_ reloads the previous clip through the free buffer, cuts once it has rendered, drops anything queued or armed, and is refused mid-fade; _Blackout_ and _Freeze_ toggle against each other and are not quantised to a bar (a panic press must be visible on the next frame). Freeze stops the compositor and holds an armed switch, which slips until the first bar after it lifts, so `current` never names a clip nobody can see; a fade already running is measured in wall-clock time, so one that ends during a freeze has landed by the time the freeze lifts, and the picture jumps to it. Blackout keeps rendering underneath so the picture is current when lifted. Hold only stops _auto-advance_; there is no "extend by N bars". What would settle them: a performer using Back after a choice, and a freeze held across a switch's bar.
+- [ ] **A reload is the show's main risk, because the picture and all live state are one page.** What a reload does now: the browser asks first (`beforeunload`, only once the page has been interacted with). If the performer goes ahead, the page restarts. The clip on screen, the tempo and its bar grid, and a blackout come back from `sessionStorage` (`client/show-memory.ts`), so the same clip is showing on the same grid and a covered picture stays covered, after the seconds a reload takes. Everything else is gone: the loaded track and its position, candidates and any choice, the standing direction, the history sent to the decision layer, the recent transitions the variety rule reads, Hold, and Freeze (the frame it held is gone with the canvas, so the picture comes back moving). A browser crash or a closed tab loses everything, since `sessionStorage` is per tab; whether a crash restore keeps it is not verified. The picture restarts on a cut, not a fade. What would settle it: a performer reloading mid-set and saying what they missed first. Restoring the track and its position is the likely next step; replaying a fade in flight probably is not.
 - [ ] **A track's own next item is never re-decided by §9.2's rules, and nothing after the track's end advances by itself.** `TrackItem.transitionLocked` has no column and `resolveTrack` erases whether an item's `transitionIn` was explicit or came from `Track.defaultTransition`, so the screen cannot tell a locked item from an automatic one and uses the resolved transition as given. A picked candidate gets `chooseTransition`'s answer, candidate #1 the response's `suggestedTransition` after the browser has applied §9.2's variety rule to it (the Worker never sees what was played, so only the browser can), and the performer's one-click choice outranks both (Change cycles cut → 1 bar → 2 bars → 4 bars → cut). After the last item, candidate #1 is staged as §7 says, but auto-advance only drives track items, so it waits for Go; with no track loaded the Auto toggle is disabled and every switch is manual. What would settle it: an explicit `transitionLocked` column and an answer to whether "the default" in §7 means staged or also auto-advanced.
 - [ ] **A candidate pick replaces the track's next item rather than skipping it, and the timeline names the plan, not the clip.** Picking a candidate while item N is on screen makes the pick take item N+1's place and the track resumes at N+2, so N+1 is never played. Picking one when no item follows N leaves the track cursor on N, and it stays there while the pick plays: the run counts the clips played beyond the last item, so Back walks out of them one at a time and then back through the track. After either, NOW still reads "item N+1 of M" and the timeline highlights the track's own clip for that position, although a different clip is playing. What would settle it: a performer reading the screen after an override, and whether the timeline should mark the replaced item.
-- [ ] **What the live screen records after Back and Go now.** The transition list the variety rule reads holds the transition each clip _arrived_ with (`PlaybackState.arrivedBy`): a cut for Back, whatever the switch used otherwise. Go now over a running fade records that fade's transition, not the cut the output was sent, because the audience watched the fade begin and the rule is about what the set looked like. The clip log sent to the decision layer (`historyIds`) is the play log §8.2 asks for, not the reducer's Back stack: a clip the performer backed out of was shown, so it stays in the log and the next request does not offer it straight back, while the reducer drops it. What would settle it: a performer who backs out of a clip and says whether being offered it again would have been wrong.
-- [ ] **A click the control window would refuse is not recorded, and what the performer wanted is lost, not deferred.** NEXT is read from what the control window has staged. A candidate click, a `1`/`2`/`3` key or a transition change during a fade, which the reducer refuses, changes nothing: the candidate buttons and Change are disabled by the reducer's own predicates and the panel says why. Once Go is armed a click still replaces Next (the performer is allowed to), but a late answer never does. Nothing queues a refused pick for the landing, because the candidates it was chosen from are replaced then. What would settle it: a performer clicking during a long fade and saying whether they expected the click to apply when it landed.
+- [ ] **What the stage records after Back and Go now.** The transition list the variety rule reads holds the transition each clip _arrived_ with (`PlaybackState.arrivedBy`): a cut for Back, whatever the switch used otherwise. Go now over a running fade records that fade's transition, not the cut the output was sent, because the audience watched the fade begin and the rule is about what the set looked like. The clip log sent to the decision layer (`historyIds`) is the play log §8.2 asks for, not the reducer's Back stack: a clip the performer backed out of was shown, so it stays in the log and the next request does not offer it straight back, while the reducer drops it. What would settle it: a performer who backs out of a clip and says whether being offered it again would have been wrong.
+- [x] **What happens to a choice made during a fade**: it is held, and arms the bar after the landing (§7, ADR 0012). The cards are never disabled by a fade. A chosen card stays on screen as the last card through the answer a landing asks for. Change, the track selector and Go are still refused during a fade, visibly: a transition is re-decided at the landing anyway, and a track cannot be staged with the free slot in use. Not settled: there is no way to take a choice back. Clicking the same card again does nothing, and Back drops an armed choice but also goes back. What would settle it: a performer who chose wrong.
 - [ ] **Loading or leaving a track throws away the candidates, and cannot unstage what is already staged.** `setTrack` discards the candidates and the picks made against them and asks again, because a candidate ranked for another licence mode may not be played in a commercial track (§14.2), and a request id bump drops any answer still in flight. `Control` has no way to unstage a clip, and the screen holds no `commercialOk` for a clip it has not fetched in full, so a track with no steps leaves whatever was staged before it staged. A track with steps stages its first step over it. What would settle it: an `unstage`, or filtering candidates by `commercialOk` on the screen as well as in the route.
 - [ ] **Two annotation jobs for one clip are ordered by the row, not by a lock, and stills have no sweeper.** A registration job writes only a clip that is still `pending`, and a failure only marks a `pending` clip, so a job that lost the race cannot overwrite or demote a finished annotation. A stills job always writes, so two uploads for one clip leave whichever job finishes last. A replacement upload writes under a new prefix and deletes the old objects last; if that delete fails it only logs, and the unreferenced objects stay in R2 (private, never served) until something sweeps them. Two uploads racing for one clip can also orphan one set, because each deletes the keys it read at the start. What would settle it: a sweep of `stills/` against `clips.still_keys`.
-- [ ] **A reloaded output draws one frame before it honours a freeze.** Freeze skips rendering once a frame has been drawn with a switch applied, and not before, because the control tells a reloaded window to freeze before it says what to show. The restore cut is drawn once; every later switch, including a Go now pressed under freeze, is held. Not verified in a browser: the drivers do not reload the output window while frozen.
+- [x] **What a reload does under a freeze**: the freeze is dropped, because the frame it held is gone. A blackout is kept (see the reload entry above).
 - [ ] **The production target has no route.** It sets `workers_dev` and `preview_urls` to false like preview, so until M12 attaches a route and an Access policy the Worker is unreachable rather than reachable outside Access. Whether the first `void deploy` of it keeps both flags off is read from the built `dist/ssr/wrangler.json`, not from a deploy.
-- [ ] **The decision indicator is a label, not §12.1's `[online ▼]` profile selector, and a candidate that cannot be fetched is dropped.** The top bar shows which layer produced the top candidate (`rule ranking` or the provider id) and whether the answer is stale; there is no profile to choose because §8.4's profiles are not built. A candidate whose clip code fails to load cannot be staged, so it is not offered, and the screen can show fewer than three cards. The request goes out when a clip lands, so the answer is ready before the next switch only if the clip's bars outlast the round trip, which is unmeasured for a 1-bar step.
-- [ ] **The browser drivers cannot see a candidate's thumbnail video.** None of the seeded clips has a thumbnail, so `live.mjs` proves the cards render and say "no thumbnail" but never that a `<video>` autoplays inside a card. Seed a clip with a recorded thumbnail to close it.
+- [ ] **The decision indicator is a label, not a profile selector, and a candidate that cannot be fetched is dropped.** The control row shows which layer produced the top candidate (`rule ranking` or the provider id) and whether the answer is stale; there is no profile to choose because §8.4's profiles are not built. A candidate whose clip code fails to load cannot be staged, so it is not offered, and the screen can show fewer than three cards. The request goes out when a clip lands, so the answer is ready before the next switch only if the clip's bars outlast the round trip, which is unmeasured for a 1-bar step.
+- [x] **A candidate's thumbnail is seen in a real browser.** `stage.mjs` records a real WebM with `MediaRecorder`, uploads it, and reads the card's `<video>`: a decoded first frame with real pixels, paused, playing on hover and focus, paused again on leave. Hover playback and first-frame decoding were observed on Chromium under software rendering only.
 - [ ] **A client-mounted page cannot answer with a status.** Void's documented loader API returns props; `c.status(404)` in the catch-all's loader left the shell at 200, so an unmatched path that does not name a file renders "Not found" under a 200. That matches the old SPA fallback, which also answered 200, and is harmless to a performer, but it is a soft 404 to a crawler or a monitor. A file path does answer 404, by throwing `HTTPException` in the same loader. What would settle it: a documented way for a `ssr = false` page to set its response status, or a decision that a soft 404 is acceptable behind Access.
-- [ ] **Offline caching needs one shell per route.** The old SPA served a single `index.html` for every path, so a Service Worker (§15.2) that cached it could reload any page offline. A Void page's HTML carries its own route's `__VOID_PAGE_DATA__` and shared data, and the client script's URL is hashed, so offline reload of `/output` or `/studio` needs those shells cached per route or reconstructed. Local mode is unaffected (the Worker is on the machine). M11's "Prepare offline" has to answer this before it can promise a deployed Worker survives a dropped network.
-- [ ] **`@void/svelte` 1.5.0 is two days old, and the Pages path is the least-travelled part of Void.** It was published 2026-11-02, inside the release-age window, and approved by the maintainer along with the rest of the 1.5 series. A sibling project found `useParams()` going stale after navigation in `@void/solid` 1.4.0; in the Svelte adapter `/studio/tracks/[id]` was driven from a list link and by a same-route history change, and reloaded track B each time, so `useParams()` is used as is. `useRouter().params` is the fallback if that regresses.
+- [ ] **Offline caching needs the stage's shell cached.** A Void page's HTML carries its route's `__VOID_PAGE_DATA__` and shared data, and the client script's URL is hashed, so a Service Worker (§15.2) has to cache the shell of `/` itself, or reconstruct it, before a deployed Worker can survive a dropped network. There is one route to cover now. Local mode is unaffected (the Worker is on the machine). M11's "Prepare offline" has to answer this.
+- [ ] **`@void/svelte` 1.5.0 is two days old, and the Pages path is the least-travelled part of Void.** It was published 2026-11-02, inside the release-age window, and approved by the maintainer along with the rest of the 1.5 series. The stage is one page with no route parameters now, so the `useParams()` staleness a sibling project found in `@void/solid` 1.4.0 no longer has anywhere to bite.
 - [ ] **`routing.notFound: 'none'` is now mostly inert.** The Worker is first for every path (`run_worker_first: ["/**"]`) and answers unmatched ones through the catch-all page, so the asset layer's not-found handling is never reached. It stays `none` as the explicit statement that no asset fallback may swallow an unknown path.
+- [ ] **A probe's and a recording's cost to the picture, and the show's cost to a probe, are unmeasured.** They share one GPU and one thread (§3). A probe blocks the thread for its whole run, since it compiles and reads pixels synchronously, so the picture stops for that long; a recording renders a second Hydra for three seconds and encodes video. The frame-budget number may read high beside a heavy clip, so a clip can be refused for the show's cost rather than its own. Chromium here renders in software, so nothing measured here speaks to a real GPU. Refusing while a switch is armed or fading covers only the worst moment: a recording that started before a choice can still run through its bar. What would settle it: on the performing machine, a frame-time log of the live picture across a probe and a recording, and the same clip probed with and without a heavy clip playing.
+- [ ] **A lost live GPU context is reported, not recovered.** `webglcontextlost` on the stage's canvas puts a notice on screen, and a reload brings the picture back with its clip and tempo. A registration panel's failed or lost context costs only that attempt, which `stage.mjs` drives in a browser, but a GPU process crash would take the live context with it. What would settle it: rebuilding the compositor on a fresh canvas from what the control holds, loading the current and next clips; about the size of the deleted `hello` handshake.
+- [ ] **`Esc` in browser fullscreen.** The browser spends `Esc` on leaving fullscreen, and `Esc` is the Freeze key. `navigator.keyboard.lock(['Escape'])` is asked for on entering fullscreen, which should give the key to the page in Chromium, with holding `Esc` still leaving. Not verified: headless Chromium takes synthetic keys without its fullscreen UI in the way, so only a person at a real display can see it. Elsewhere `Esc` leaves fullscreen, exposing browser chrome to the audience, and the Freeze button is the way to freeze.
+- [ ] **How much a choice made too close to the bar costs.** The rule is a whole bar: a slot that has not drawn two frames at the bar line slips to the next one (§7). In a 2000ms bar that needs a choice about two frames before the line to land on it. What is not measured is how often a real shader's compile, which blocks the thread, pushes a choice made well before the line past it. The countdown visibly jumps by a bar when that happens, and nothing else says why. The reducer and control tests cover the rule; no browser driver lands a click inside that window, because the timing is not repeatable there.
+- [ ] **The audience sees everything that is on the stage.** Decided (ADR 0012). Overlays are off by default and the row is small, but a mis-click, a validation error, a clip's source and a track's title are all on the projection, and nothing separates what the performer needs from what the room sees. What would settle it: a performer's first real set, and whether the row needs a way to hide itself between gestures, which nothing here offers.
+- [ ] **A recording whose context is lost part way can still look like it worked.** `stage.mjs` loses the recording's context on purpose: the show is untouched and the recording ends, but with the palette `000000` and three annotation frames, and nothing in the panel says the frames are black. Saving then stores a thumbnail, palette and stills that do not show the clip. What would settle it: `webglcontextlost` on the recording canvas failing the capture, the way a thrown error does.
+- [ ] **A track stops at a step whose clip will not compile.** The step is tried once, the screen says why, and the picture stays where it is, but the track does not skip past it: the steps after it are not reached unless the performer chooses something. A probed clip cannot get here, but `POST /api/clips` cannot run a probe, so a clip registered through the API can. What would settle it: whether a performer would rather the track skipped it.
+- [ ] **Choosing the same clip again takes the choice back, and the edges of that are decisions.** Built as: a second click or key on the clip that is armed, or held through a fade, drops it. The reducer cannot tell a switch armed by Go from one armed by a choice, so Go on a staged candidate followed by a click on that card also cancels. After a cancel the fallback is staged but not armed, so its card reads as what Go would play, and not as outlined. A cancel during a fade leaves the fade alone, nothing armed at the landing, and the fallback staged. Taking a choice back restores the track cursor, so the track stages its own next item again rather than stalling on an override that is gone. What would settle it: a performer who clicked the wrong card, and what they expected the second click to do.
+- [ ] **Hold on a deferred choice stays on, and the choice still fires.** A choice made in a fade releases Hold when it is made. A Hold pressed after it, before the landing, survives the landing and the choice arms its bar. Hold pauses automatic advance and does not take back what the performer asked for, which is also what it does to a switch armed outside a fade. What would settle it: a performer pressing Hold to stop a switch they had already asked for.
+- [ ] **A shader that will not link is found by drawing it once, which costs a WebGL round trip and one frame in the free slot.** Hydra's `.out()` swallows its own errors, so `load` now checks two things: the slot's draw command was replaced (a failure while generating GLSL leaves the old one), and one draw into that slot raises no WebGL error (a program the driver refuses is an INVALID_OPERATION on first use). Both were seen in Chromium under SwiftShader: `solid("undefined_identifier", 0, 0, 1).out()` loads without throwing, draws transparent black and raises 1282. Not measured: what the `getError` round trip and the extra draw cost on a real GPU with a heavy shader, in a frame where the show is also rendering; the compile itself has always happened on the show's thread. The probe's wording for a clip like this changed with it, from "wrote nothing to its buffer" to "did not compile", because `load` now throws before the pixel check. What would settle it: a frame-time log across a load on the performing machine.
+- [ ] **A refused clip is compiled once, but the screen still asks for it on every notification.** The control remembers the code it refused and answers with the same reason, so a track step that will not compile costs one compile however many times the screen re-stages it. The screen's sync still calls `stage` on each notification and the control still unstages it, which is two snapshots to subscribers per tick while a refused step is wanted, and the notice is set again each time. It costs no compile. What would settle it: whether that churn shows in a frame log, and if it does, `syncNext` skipping a clip the control has refused.
+- [ ] **Back refuses a second press for two frames.** The cut waits for the reloaded slot to render, and a staged clip's load waits behind it, so a second Back inside that window would reload over the slot the first is waiting on. It is refused, and the button reads disabled for those frames. At 60 frames a second that is about 33ms, which a performer should not notice and a double press from a pad might. What would settle it: a performer pressing Back twice quickly.
+- [ ] **What `/` is on a public deployment.** §0 calls `vev.0x7.sh` the project's public site, with docs and demo tracks, and §13 keeps `/t/<slug>` public, but `/` is now the owner's stage, and the Access policy observed on the preview covers the whole hostname, including `/t/*`, `/media/*` and `/api/health`. M10 and M12 have to decide where a public landing lives (another hostname is the simple answer), and the Access application has to bypass `/t/*`, `GET /api/public/tracks/*`, `/media/*` and `/api/health` once those are meant to be public. The Worker's own guard covers `/api/*` only, as it did: a client-mounted shell at `/` carries no data, and if Access were misconfigured off, a visitor would get a stage whose API calls answer 403.
 
 ---
 

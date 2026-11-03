@@ -6,8 +6,9 @@ import type { Clip, EngineKind, NewClip, NewClipOrigin } from '@vev/shared'
 import { clipSchema, newClipSchema } from '@vev/shared'
 import * as v from 'valibot'
 
+import type { Compositor } from './compositor.ts'
+import { createHydraCompositor } from './compositor.ts'
 import { failure } from './library.ts'
-import type { Compositor } from './output-client.ts'
 import { dominantColours, readCanvasPixelsSync, recordThumbnail } from './palette.ts'
 import type { SampledFrame } from './palette.ts'
 import { encodeJpeg, snapshotCanvas, stillMoments, stillSize } from './stills.ts'
@@ -16,12 +17,10 @@ import type { StillSize } from './stills.ts'
 /**
  * The registration screen's own transient `HydraCompositor` (spec §11.1) is created for the
  * probe, used for the thumbnail recording, and disposed immediately — never left mounted after
- * save. Spec §3 says rendering happens only in the output window; that rule is about *the show*
- * rendering in one place, not about every WebGL context vev ever opens. §11.1 requires the probe
- * and the thumbnail recording to run in a browser, and the registration screen is the only browser
- * that request has — so it mounts its own, disposable, context. §6.5's cap on live WebGL contexts
- * is exactly why "disposed immediately" matters here, not "never created". Task 7 amends §3's text
- * to say this; this module is what makes the amendment true rather than aspirational.
+ * save. §11.1 requires the probe and the thumbnail recording to run in a browser, and the stage is
+ * the only browser there is, so they run beside the live picture on its GPU (ADR 0012).
+ * `registrationGate` keeps them away from a switch in flight, and §6.5's cap on live WebGL contexts
+ * is why "disposed immediately" matters here, not "never created".
  */
 
 /** What a registrant fills in on the registration form — the browser-side counterpart of `@vev/shared`'s `newClipSchema`. */
@@ -108,7 +107,7 @@ export const buildNewClip = (input: ClipFormInput): NewClip =>
  * validation gate. Declared here, not imported as a value from there, so this module can be
  * imported (and tested) without ever touching `hydra-synth` or `window` — see `runProbe`'s default,
  * which is the only place the real thing is reached, and only via a dynamic import, matching
- * `output-client.ts`'s `defaultCreateCompositor`.
+ * `createHydraCompositor`.
  */
 export type ProbeFn = (code: string, canvas: HTMLCanvasElement) => Promise<ProbeResult>
 
@@ -128,11 +127,6 @@ export const runProbe = async (
   canvas: HTMLCanvasElement,
   probe: ProbeFn = defaultProbe,
 ): Promise<ProbeResult> => await probe(code, canvas)
-
-const defaultCreateCompositor = async (clock: Clock): Promise<Compositor> => {
-  const { HydraCompositor } = await import('@vev/engines/hydra')
-  return new HydraCompositor(clock)
-}
 
 /** Encodes every copied frame, dropping any the browser cannot encode rather than failing the capture. */
 const encodeStills = async (
@@ -203,7 +197,7 @@ export const captureThumbnail = async (
   deps: CaptureThumbnailDeps = {},
 ): Promise<ThumbnailCapture> => {
   const {
-    createCompositor = defaultCreateCompositor,
+    createCompositor = createHydraCompositor,
     encode = encodeJpeg,
     now = Date.now,
     record = recordThumbnail,
@@ -213,38 +207,38 @@ export const captureThumbnail = async (
 
   const clock: Clock = { beatsPerBar: 4, bpm: 120, downbeatAt: now() }
   const compositor = await createCompositor(clock)
-  compositor.mount(canvas)
-  compositor.load('a', code)
-  compositor.switchTo('a', { bars: 0, kind: 'cut' }, now())
-
-  const midpointMs = midRecordingFraction(ms)
-  const startedAt = now()
-  const moments = stillMoments(ms)
-  const size = stillSize(canvas.width, canvas.height)
-  const snapshots: HTMLCanvasElement[] = []
-  let midFrame: SampledFrame | undefined
   let frame: number | undefined
-  const tick = (): void => {
-    compositor.tick(now())
-    const elapsed = now() - startedAt
-    if (midFrame === undefined && elapsed >= midpointMs) {
-      midFrame = sample(canvas)
-    }
-    if (size !== undefined && moments.length > 0 && elapsed >= (moments[0] ?? Infinity)) {
-      // A moment is spent whether or not the copy works: retrying a failing copy every frame
-      // would only repeat the failure.
-      moments.shift()
-      try {
-        snapshots.push(snapshot(canvas, size))
-      } catch (error) {
-        console.error('captureThumbnail: could not copy a still frame', error)
+  try {
+    compositor.mount(canvas)
+    compositor.load('a', code)
+    compositor.switchTo('a', { bars: 0, kind: 'cut' }, now())
+
+    const midpointMs = midRecordingFraction(ms)
+    const startedAt = now()
+    const moments = stillMoments(ms)
+    const size = stillSize(canvas.width, canvas.height)
+    const snapshots: HTMLCanvasElement[] = []
+    let midFrame: SampledFrame | undefined
+    const tick = (): void => {
+      compositor.tick(now())
+      const elapsed = now() - startedAt
+      if (midFrame === undefined && elapsed >= midpointMs) {
+        midFrame = sample(canvas)
       }
+      if (size !== undefined && moments.length > 0 && elapsed >= (moments[0] ?? Infinity)) {
+        // A moment is spent whether or not the copy works: retrying a failing copy every frame
+        // would only repeat the failure.
+        moments.shift()
+        try {
+          snapshots.push(snapshot(canvas, size))
+        } catch (error) {
+          console.error('captureThumbnail: could not copy a still frame', error)
+        }
+      }
+      frame = requestAnimationFrame(tick)
     }
     frame = requestAnimationFrame(tick)
-  }
-  frame = requestAnimationFrame(tick)
 
-  try {
     const blob = await record(canvas, ms)
     return {
       blob,
@@ -252,6 +246,8 @@ export const captureThumbnail = async (
       stills: await encodeStills(snapshots, encode),
     }
   } finally {
+    // Everything after the compositor exists is inside this block: a clip edited into a syntax error
+    // after its probe passed throws from `load`, and a context left behind is one fewer for the show.
     if (frame !== undefined) {
       cancelAnimationFrame(frame)
     }

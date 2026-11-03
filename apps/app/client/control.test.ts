@@ -1,68 +1,73 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import { FIXTURES, nextBarAt } from '@vev/engines'
-import type { OutputMessage } from '@vev/shared'
+import type { Slot, TransitionSpec } from '@vev/shared'
 import { describe, expect, it, vi } from 'vitest'
 
-import type { LoadedTrack, PlayableClip, TrackStep } from './control.ts'
-import { controlHints, createControl, startControl } from './control.ts'
+import type {
+  Control,
+  CreateControlOptions,
+  LoadedTrack,
+  Picture,
+  PlayableClip,
+  TrackStep,
+} from './control.ts'
+import { controlHints, createControl } from './control.ts'
 
-/**
- * A fake `BroadcastChannel`, the same shape as `output-client.test.ts`'s:
- * only what `startControl` uses (`addEventListener`/`removeEventListener`
- * for `'message'`, `close`, `postMessage`), plus a `receive` helper to push a
- * raw payload the way another document's `postMessage` would.
- */
-class FakeChannel {
-  closed = false
-  posted: unknown[] = []
-  private listener: ((event: MessageEvent) => void) | undefined
+type PictureCall =
+  | { code: string; kind: 'load'; slot: Slot }
+  | { at: number; kind: 'switch'; to: Slot; transition: TransitionSpec }
 
-  addEventListener(type: 'message', listener: (event: MessageEvent) => void): void {
-    if (type === 'message') {
-      this.listener = listener
-    }
+/** What the picture was told, in order. A switch appearing here is the moment it reached the screen. */
+const fakePicture = () => {
+  const messages: PictureCall[] = []
+  const ticks: number[] = []
+  const picture: Picture = {
+    load: (slot, code) => {
+      messages.push({ code, kind: 'load', slot })
+    },
+    switchTo: (to, transition, at) => {
+      messages.push({ at, kind: 'switch', to, transition })
+    },
+    tick: (now) => {
+      ticks.push(now)
+    },
   }
-
-  removeEventListener(type: 'message', listener: (event: MessageEvent) => void): void {
-    if (type === 'message' && this.listener === listener) {
-      this.listener = undefined
-    }
-  }
-
-  receive(data: unknown): void {
-    this.listener?.({ data } as MessageEvent)
-  }
-
-  postMessage(data: unknown): void {
-    this.posted.push(data)
-  }
-
-  close(): void {
-    this.closed = true
-  }
+  return { messages, picture, ticks }
 }
 
-const createFrameScheduler = () => {
-  let nextHandle = 0
-  const pending = new Map<number, () => void>()
-  return {
-    cancelFrame: (handle: number) => {
-      pending.delete(handle)
+/**
+ * A control whose slots are always rendered in time: every call that loads a clip is followed by
+ * the frames a real loop would draw. What happens when they are NOT in time is the subject of the
+ * `the picture obeys the reducer` block, which uses `createControl` bare.
+ */
+const setup = (options: CreateControlOptions = {}) => {
+  const { messages, picture, ticks } = fakePicture()
+  const bare = createControl(picture, options)
+  messages.length = 0
+  const rendered = (): void => {
+    bare.tick()
+    bare.tick()
+  }
+  const control: Control = {
+    ...bare,
+    choose: (clipId) => {
+      bare.choose(clipId)
+      rendered()
     },
-    fire: () => {
-      const runs = [...pending.values()]
-      pending.clear()
-      for (const run of runs) {
-        run()
-      }
+    loadTrack: (track) => {
+      bare.loadTrack(track)
+      rendered()
     },
-    requestFrame: (run: () => void) => {
-      const handle = nextHandle
-      nextHandle += 1
-      pending.set(handle, run)
-      return handle
+    stage: (clipId) => {
+      bare.stage(clipId)
+      rendered()
+    },
+    tick: () => {
+      bare.tick()
+      rendered()
     },
   }
+  return { bare, control, messages, picture, ticks }
 }
 
 /** A controllable wall clock: `set` moves it, `advance` steps it forward. */
@@ -81,393 +86,194 @@ const createFakeNow = (start: number) => {
   }
 }
 
-describe(createControl, () => {
-  it('queueing a clip publishes a load for the free slot', () => {
-    const messages: OutputMessage[] = []
-    const control = createControl(
-      (message) => {
-        messages.push(message)
-      },
-      { startClipId: 'quiet' },
-    )
+const FADE_SPEC = { bars: 2, kind: 'crossfade' } as const
+const CUT_SPEC = { bars: 0, kind: 'cut' } as const
 
-    control.queue('loud')
+const switches = (messages: readonly PictureCall[]) => messages.filter((call) => call.kind === 'switch')
+
+describe(createControl, () => {
+  it('puts the start clip on the picture as soon as it exists', () => {
+    const { messages, picture } = fakePicture()
+    createControl(picture, { now: () => 700, startClipId: 'quiet' })
 
     expect(messages).toStrictEqual([
-      { clip: { code: FIXTURES[1].code, id: 'loud' }, kind: 'load', slot: 'b' },
+      { code: FIXTURES[0].code, kind: 'load', slot: 'a' },
+      { at: 700, kind: 'switch', to: 'a', transition: CUT_SPEC },
     ])
   })
 
-  it('queueing the same clip twice does not re-publish a load', () => {
-    const messages: OutputMessage[] = []
-    const control = createControl(
-      (message) => {
-        messages.push(message)
-      },
-      { startClipId: 'quiet' },
-    )
+  it('staging a clip loads it into the free slot', () => {
+    const { control, messages } = setup({ startClipId: 'quiet' })
 
-    control.queue('loud')
-    control.queue('loud')
+    control.stage('loud')
+
+    expect(messages).toStrictEqual([{ code: FIXTURES[1].code, kind: 'load', slot: 'b' }])
+  })
+
+  it('staging the same clip twice does not load it again', () => {
+    const { control, messages } = setup({ startClipId: 'quiet' })
+
+    control.stage('loud')
+    control.stage('loud')
 
     expect(messages).toHaveLength(1)
   })
 
-  it('Go publishes a switch whose at equals nextBarAt', () => {
+  it('Go reaches the picture on the bar it armed, and not a frame before', () => {
     const clockNow = createFakeNow(0)
-    const messages: OutputMessage[] = []
-    const control = createControl(
-      (message) => {
-        messages.push(message)
-      },
-      {
-        now: clockNow.now,
-        startClipId: 'quiet',
-      },
-    )
+    const { control, messages } = setup({ now: clockNow.now, startClipId: 'quiet' })
 
-    control.queue('loud')
+    control.stage('loud')
     clockNow.set(2500)
     control.go()
 
     // 120bpm, 4 beats/bar → a 2000ms bar; 2500 sits mid-bar, so the next downbeat is 4000.
-    const expectedAt = nextBarAt({ beatsPerBar: 4, bpm: 120, downbeatAt: 0 }, 2500)
-    expect(expectedAt).toBe(4000)
-    expect(messages.at(-1)).toStrictEqual({
-      at: 4000,
-      kind: 'switch',
-      to: 'b',
-      transition: { bars: 0, kind: 'cut' },
-    })
+    expect(nextBarAt({ beatsPerBar: 4, bpm: 120, downbeatAt: 0 }, 2500)).toBe(4000)
+    expect(control.getSnapshot().firingAt).toBe(4000)
+    clockNow.set(3999)
+    control.tick()
+    expect(switches(messages)).toStrictEqual([])
+
+    clockNow.set(4000)
+    control.tick()
+    expect(switches(messages)).toStrictEqual([{ at: 4000, kind: 'switch', to: 'b', transition: CUT_SPEC }])
   })
 
-  it('Go now publishes a switch whose at is the moment pressed, not the next bar', () => {
+  it('Go now reaches the picture on the next frame, not the next bar', () => {
     const clockNow = createFakeNow(0)
-    const messages: OutputMessage[] = []
-    const control = createControl(
-      (message) => {
-        messages.push(message)
-      },
-      {
-        now: clockNow.now,
-        startClipId: 'quiet',
-      },
-    )
+    const { control, messages } = setup({ now: clockNow.now, startClipId: 'quiet' })
 
-    control.queue('loud')
+    control.stage('loud')
     clockNow.set(2500)
     control.goNow()
+    control.tick()
 
-    expect(messages.at(-1)).toStrictEqual({
-      at: 2500,
-      kind: 'switch',
-      to: 'b',
-      transition: { bars: 0, kind: 'cut' },
-    })
+    expect(messages.at(-1)).toStrictEqual({ at: 2500, kind: 'switch', to: 'b', transition: CUT_SPEC })
   })
 
-  it('Go with nothing queued publishes nothing', () => {
-    const messages: OutputMessage[] = []
-    const control = createControl(
-      (message) => {
-        messages.push(message)
-      },
-      { startClipId: 'quiet' },
-    )
+  it('Go with nothing staged tells the picture nothing', () => {
+    const { control, messages } = setup({ startClipId: 'quiet' })
 
     control.go()
 
     expect(messages).toStrictEqual([])
   })
 
-  it('Go now finishes a running crossfade immediately rather than swallowing the press', () => {
+  it('a crossfade reaches the picture once, carrying the bar it started on', () => {
     const clockNow = createFakeNow(0)
-    const messages: OutputMessage[] = []
-    const control = createControl(
-      (message) => {
-        messages.push(message)
-      },
-      {
-        now: clockNow.now,
-        startClipId: 'quiet',
-      },
-    )
+    const { control, messages } = setup({ now: clockNow.now, startClipId: 'quiet' })
 
-    control.setTransitionKind('crossfade')
-    control.queue('loud')
+    control.setTransition(FADE_SPEC)
+    control.stage('loud')
     control.go()
-    // Land on the armed bar (4000) so the fade begins.
-    clockNow.set(4000)
+    clockNow.set(2000)
+    control.tick()
+    clockNow.set(3000)
+    control.tick()
+    clockNow.set(6000)
+    control.tick()
+
+    expect(switches(messages)).toStrictEqual([{ at: 2000, kind: 'switch', to: 'b', transition: FADE_SPEC }])
+    expect(control.getSnapshot().current.clipId).toBe('loud')
+  })
+
+  it('a transition changed between the press and the bar is the one that fires', () => {
+    const clockNow = createFakeNow(0)
+    const { control, messages } = setup({ now: clockNow.now, startClipId: 'quiet' })
+
+    control.stage('loud')
+    control.go()
+    control.setTransition(FADE_SPEC)
+    clockNow.set(2000)
+    control.tick()
+
+    expect(switches(messages)).toStrictEqual([{ at: 2000, kind: 'switch', to: 'b', transition: FADE_SPEC }])
+  })
+
+  it('Go now finishes a running crossfade with a cut rather than swallowing the press', () => {
+    const clockNow = createFakeNow(0)
+    const { control, messages } = setup({ now: clockNow.now, startClipId: 'quiet' })
+
+    control.setTransition(FADE_SPEC)
+    control.stage('loud')
+    control.go()
+    clockNow.set(2000)
     control.tick()
     expect(control.getSnapshot().next).toBeDefined()
 
     messages.length = 0
-    clockNow.set(4500)
+    clockNow.set(2500)
     control.goNow()
 
-    expect(messages).toStrictEqual([
-      { at: 4500, kind: 'switch', to: 'b', transition: { bars: 0, kind: 'cut' } },
-    ])
+    expect(messages).toStrictEqual([{ at: 2500, kind: 'switch', to: 'b', transition: CUT_SPEC }])
     expect(control.getSnapshot().next).toBeUndefined()
   })
 
-  it('Go mid-fade changes nothing and publishes nothing', () => {
+  it('Go mid-fade changes nothing and tells the picture nothing', () => {
     const clockNow = createFakeNow(0)
-    const messages: OutputMessage[] = []
-    const control = createControl(
-      (message) => {
-        messages.push(message)
-      },
-      { now: clockNow.now, startClipId: 'quiet' },
-    )
+    const { control, messages } = setup({ now: clockNow.now, startClipId: 'quiet' })
 
-    control.setTransitionKind('crossfade')
-    control.queue('loud')
+    control.setTransition(FADE_SPEC)
+    control.stage('loud')
     control.go()
-    // Land on the armed bar (2000) so the fade begins.
     clockNow.set(2000)
     control.tick()
     expect(control.getSnapshot().fading).toBe(true)
 
-    const { barPhase: _barPhase, ...before } = control.getSnapshot()
+    const { barPhase: _barPhase, now: _now, ...before } = control.getSnapshot()
     messages.length = 0
     clockNow.set(2500)
     control.go()
 
-    const { barPhase: _barPhaseAfter, ...after } = control.getSnapshot()
+    const { barPhase: _barPhaseAfter, now: _nowAfter, ...after } = control.getSnapshot()
     expect(messages).toStrictEqual([])
     expect(after).toStrictEqual(before)
   })
 
-  it('toggling the transition kind mid-fade neither alters the running fade nor completes it early', () => {
+  it('changing the transition mid-fade neither alters the running fade nor completes it early', () => {
     const clockNow = createFakeNow(0)
-    const messages: OutputMessage[] = []
-    const control = createControl(
-      (message) => {
-        messages.push(message)
-      },
-      { now: clockNow.now, startClipId: 'quiet' },
-    )
+    const { control, messages } = setup({ now: clockNow.now, startClipId: 'quiet' })
 
-    control.setTransitionKind('crossfade')
-    control.queue('loud')
+    control.setTransition(FADE_SPEC)
+    control.stage('loud')
     control.go()
-    // Land on the armed bar (2000) so the fade begins.
     clockNow.set(2000)
     control.tick()
     expect(control.getSnapshot().fading).toBe(true)
 
     messages.length = 0
-    control.setTransitionKind('cut')
+    control.setTransition(CUT_SPEC)
 
     expect(messages).toStrictEqual([])
-    expect(control.getSnapshot().transitionKind).toBe('crossfade')
+    expect(control.getSnapshot().transition).toStrictEqual(FADE_SPEC)
 
-    // A `cut` transition's `bars` is 0 — if the toggle had taken effect, the
-    // fade would already be done on the next tick. Confirm it is not.
+    // A `cut`'s `bars` is 0: if the change had taken effect, the fade would be done on the next tick.
     clockNow.set(2500)
     control.tick()
     expect(control.getSnapshot().current.clipId).toBe('quiet')
     expect(control.getSnapshot().fading).toBe(true)
   })
 
-  it('queueing mid-fade publishes no load and does not change what the fade is blending into', () => {
+  it('staging mid-fade loads nothing and does not change what the fade is blending into', () => {
     const clockNow = createFakeNow(0)
-    const messages: OutputMessage[] = []
-    const control = createControl(
-      (message) => {
-        messages.push(message)
-      },
-      { now: clockNow.now, startClipId: 'quiet' },
-    )
+    const { control, messages } = setup({ now: clockNow.now, startClipId: 'quiet' })
 
-    control.setTransitionKind('crossfade')
-    control.queue('loud')
+    control.setTransition(FADE_SPEC)
+    control.stage('loud')
     control.go()
-    // Land on the armed bar (2000) so the fade begins.
     clockNow.set(2000)
     control.tick()
-    expect(control.getSnapshot().fading).toBe(true)
-    expect(control.getSnapshot().next?.clipId).toBe('loud')
 
     messages.length = 0
-    // Only 'quiet' and 'loud' exist as fixtures; re-queueing 'quiet' (the
-    // clip currently playing) into the fade's destination slot is still a
-    // distinct value from 'loud' and so still exercises the guard —
-    // `fixtureById` would otherwise skip an unknown id before `reduce` is
-    // ever reached, deciding nothing about the mid-fade behaviour at all.
-    control.queue('quiet')
+    control.stage('quiet')
 
     expect(messages).toStrictEqual([])
     expect(control.getSnapshot().next?.clipId).toBe('loud')
-  })
-
-  it('hello mid-fade re-sends the transition the fade actually started with, even after a refused toggle attempt', () => {
-    const clockNow = createFakeNow(0)
-    const messages: OutputMessage[] = []
-    const control = createControl(
-      (message) => {
-        messages.push(message)
-      },
-      { now: clockNow.now, startClipId: 'quiet' },
-    )
-
-    control.setTransitionKind('crossfade')
-    control.queue('loud')
-    control.go()
-    // Land on the armed bar (2000) so the fade begins.
-    clockNow.set(2000)
-    control.tick()
-    expect(control.getSnapshot().fading).toBe(true)
-
-    // Refused — must not leak into the transition handleHello re-sends below.
-    control.setTransitionKind('cut')
-
-    messages.length = 0
-    clockNow.set(2300)
-    control.handleHello()
-
-    expect(messages.at(-1)).toStrictEqual({
-      at: 2000,
-      kind: 'switch',
-      to: 'b',
-      transition: { bars: 2, kind: 'crossfade' },
-    })
-  })
-
-  it('re-publishes the switch with the new transition and the same `at` when the toggle changes while armed', () => {
-    const clockNow = createFakeNow(0)
-    const messages: OutputMessage[] = []
-    const control = createControl(
-      (message) => {
-        messages.push(message)
-      },
-      { now: clockNow.now, startClipId: 'quiet' },
-    )
-
-    control.queue('loud')
-    clockNow.set(2500)
-    control.go()
-    const armed = messages.at(-1)
-    expect(armed).toMatchObject({ at: 4000, kind: 'switch', transition: { kind: 'cut' } })
-
-    messages.length = 0
-    control.setTransitionKind('crossfade')
-
-    expect(messages.at(-1)).toStrictEqual({
-      at: 4000,
-      kind: 'switch',
-      to: 'b',
-      transition: { bars: 2, kind: 'crossfade' },
-    })
-  })
-
-  it('does not publish a switch when the toggle changes with nothing armed', () => {
-    const messages: OutputMessage[] = []
-    const control = createControl((message) => {
-      messages.push(message)
-    })
-
-    control.setTransitionKind('crossfade')
-
-    expect(messages).toStrictEqual([])
-  })
-
-  it('hello during an armed Go re-sends the pending switch with its original `at` and transition', () => {
-    const clockNow = createFakeNow(1000)
-    const messages: OutputMessage[] = []
-    const control = createControl(
-      (message) => {
-        messages.push(message)
-      },
-      { now: clockNow.now, startClipId: 'quiet' },
-    )
-
-    control.setTransitionKind('crossfade')
-    control.queue('loud')
-    clockNow.set(1500)
-    control.go()
-    // downbeatAt=1000, 120bpm → a 2000ms bar; 1500 sits mid-bar, so the next
-    // downbeat — and the armed `at` — is 3000.
-    expect(control.getSnapshot().next).toBeDefined()
-
-    messages.length = 0
-    clockNow.set(1800)
-    control.handleHello()
-
-    expect(messages.at(-1)).toStrictEqual({
-      at: 3000,
-      kind: 'switch',
-      to: 'b',
-      transition: { bars: 2, kind: 'crossfade' },
-    })
-  })
-
-  it("hello mid-fade re-sends a switch resuming from the fade's original startedAt", () => {
-    const clockNow = createFakeNow(0)
-    const messages: OutputMessage[] = []
-    const control = createControl(
-      (message) => {
-        messages.push(message)
-      },
-      { now: clockNow.now, startClipId: 'quiet' },
-    )
-
-    control.setTransitionKind('crossfade')
-    control.queue('loud')
-    control.go()
-    // Land on the armed bar (2000) so the fade begins.
-    clockNow.set(2000)
-    control.tick()
-    expect(control.getSnapshot().next).toBeDefined()
-
-    messages.length = 0
-    clockNow.set(2300)
-    control.handleHello()
-
-    expect(messages.at(-1)).toStrictEqual({
-      at: 2000,
-      kind: 'switch',
-      to: 'b',
-      transition: { bars: 2, kind: 'crossfade' },
-    })
-  })
-
-  it('answers hello with clock, a load per occupied slot, and a cut switch to the current slot', () => {
-    const clockNow = createFakeNow(1000)
-    const messages: OutputMessage[] = []
-    const control = createControl(
-      (message) => {
-        messages.push(message)
-      },
-      {
-        now: clockNow.now,
-        startClipId: 'quiet',
-      },
-    )
-    control.queue('loud')
-    messages.length = 0
-
-    control.handleHello()
-
-    expect(messages).toStrictEqual([
-      { beatsPerBar: 4, bpm: 120, downbeatAt: 1000, kind: 'clock' },
-      { clip: { code: FIXTURES[0].code, id: 'quiet' }, kind: 'load', slot: 'a' },
-      { clip: { code: FIXTURES[1].code, id: 'loud' }, kind: 'load', slot: 'b' },
-      { kind: 'panic', mode: 'none' },
-      { at: 1000, kind: 'switch', to: 'a', transition: { bars: 0, kind: 'cut' } },
-    ])
   })
 
   it('ignores a tap arriving within 50ms of the previous one (a double-fire)', () => {
     const clockNow = createFakeNow(0)
-    const messages: OutputMessage[] = []
-    const control = createControl(
-      (message) => {
-        messages.push(message)
-      },
-      { now: clockNow.now },
-    )
+    const { control } = setup({ now: clockNow.now })
 
     control.tap()
     // Within the debounce window — dropped, not a real second tap.
@@ -481,90 +287,431 @@ describe(createControl, () => {
     expect(control.getSnapshot().bpm).toBe(120)
   })
 
-  it('updates and publishes the tempo once enough taps have accumulated', () => {
+  it('a tap moves the one clock the compositor fades against', () => {
     const clockNow = createFakeNow(0)
-    const messages: OutputMessage[] = []
-    const control = createControl(
-      (message) => {
-        messages.push(message)
-      },
-      { now: clockNow.now },
-    )
+    const clock = { beatsPerBar: 4, bpm: 120, downbeatAt: 0 }
+    const { control } = setup({ clock, now: clockNow.now })
 
     control.tap()
     // 400ms apart → 150bpm.
     clockNow.set(400)
-
     control.tap()
 
     expect(control.getSnapshot().bpm).toBe(150)
-    expect(messages.at(-1)).toStrictEqual({ beatsPerBar: 4, bpm: 150, downbeatAt: 400, kind: 'clock' })
+    expect(clock).toStrictEqual({ beatsPerBar: 4, bpm: 150, downbeatAt: 400 })
+  })
+
+  it('tells subscribers at once when state changes, and only now and then when it does not', () => {
+    const clockNow = createFakeNow(0)
+    const { bare } = setup({ now: clockNow.now, startClipId: 'quiet' })
+    const seen: unknown[] = []
+    bare.subscribe((snapshot) => {
+      seen.push(snapshot)
+    })
+    seen.length = 0
+
+    for (let frame = 0; frame < 6; frame += 1) {
+      clockNow.advance(16)
+      bare.tick()
+    }
+    expect(seen.length).toBeLessThanOrEqual(1)
+
+    bare.hold()
+    expect(seen.length).toBeGreaterThanOrEqual(1)
+    seen.length = 0
+    clockNow.advance(100)
+    bare.tick()
+    expect(seen).toHaveLength(1)
   })
 })
 
-describe(startControl, () => {
-  it('answers an incoming hello on the given channel', () => {
-    const channel = new FakeChannel()
-    startControl({
-      cancelFrame: vi.fn<(handle: number) => void>(),
-      channel: channel as unknown as BroadcastChannel,
-      requestFrame: vi.fn<(run: () => void) => number>(() => 0),
-    })
+/**
+ * The seam ADR 0004 exists for: a pure decision does not guarantee the renderer obeys it. These use
+ * `createControl` bare and draw each frame by hand, because whether a slot has rendered is the point.
+ */
+describe('the picture obeys the reducer', () => {
+  const bare = (options: CreateControlOptions = {}) => {
+    const { messages, picture, ticks } = fakePicture()
+    const control = createControl(picture, { startClipId: 'quiet', ...options })
+    messages.length = 0
+    return { control, messages, ticks }
+  }
 
-    channel.posted.length = 0
-    channel.receive({ kind: 'hello' })
+  it('a choice with time to render fires on the next bar, with no Go', () => {
+    const clockNow = createFakeNow(0)
+    const { control, messages } = bare({ now: clockNow.now })
 
-    expect(channel.posted[0]).toMatchObject({ kind: 'clock' })
+    clockNow.set(1900)
+    control.choose('loud')
+    expect(messages).toStrictEqual([{ code: FIXTURES[1].code, kind: 'load', slot: 'b' }])
+    expect(control.getSnapshot().firingAt).toBe(2000)
+
+    clockNow.set(1916)
+    control.tick()
+    clockNow.set(1932)
+    control.tick()
+    clockNow.set(2000)
+    control.tick()
+
+    expect(switches(messages)).toStrictEqual([{ at: 2000, kind: 'switch', to: 'b', transition: CUT_SPEC }])
+    expect(control.getSnapshot().current.clipId).toBe('loud')
   })
 
-  it('drops a malformed incoming message without throwing', () => {
-    const channel = new FakeChannel()
-    startControl({
-      cancelFrame: vi.fn<(handle: number) => void>(),
-      channel: channel as unknown as BroadcastChannel,
-      requestFrame: vi.fn<(run: () => void) => number>(() => 0),
+  it('a choice too close to the bar slips to the following bar rather than showing an unrendered slot', () => {
+    const clockNow = createFakeNow(0)
+    const { control, messages } = bare({ now: clockNow.now })
+
+    clockNow.set(1999)
+    control.choose('loud')
+    clockNow.set(2000)
+    control.tick()
+    expect(switches(messages)).toStrictEqual([])
+    expect(control.getSnapshot().firingAt).toBe(4000)
+
+    clockNow.set(2016)
+    control.tick()
+    clockNow.set(4000)
+    control.tick()
+    expect(switches(messages)).toStrictEqual([{ at: 4000, kind: 'switch', to: 'b', transition: CUT_SPEC }])
+  })
+
+  it('one rendered frame is not enough: Hydra samples a buffer from before its last draw', () => {
+    const clockNow = createFakeNow(0)
+    const { control, messages } = bare({ now: clockNow.now })
+
+    clockNow.set(1900)
+    control.choose('loud')
+    clockNow.set(1916)
+    control.tick()
+    clockNow.set(2000)
+    control.tick()
+
+    expect(switches(messages)).toStrictEqual([])
+    expect(control.getSnapshot().firingAt).toBe(4000)
+  })
+
+  it('choosing again before the bar replaces the clip and keeps the bar', () => {
+    const clockNow = createFakeNow(0)
+    const { control, messages } = bare({ now: clockNow.now })
+
+    clockNow.set(1000)
+    control.choose('loud')
+    clockNow.set(1100)
+    control.choose('quiet')
+    expect(control.getSnapshot().next?.clipId).toBe('quiet')
+    expect(control.getSnapshot().firingAt).toBe(2000)
+
+    clockNow.set(1116)
+    control.tick()
+    clockNow.set(1132)
+    control.tick()
+    clockNow.set(2000)
+    control.tick()
+
+    expect(messages.filter((call) => call.kind === 'load')).toHaveLength(2)
+    expect(switches(messages)).toHaveLength(1)
+    expect(control.getSnapshot().current.slot).toBe('b')
+  })
+
+  it('a choice during a fade is held, loads nothing until the landing, then fires on the next bar', () => {
+    const clockNow = createFakeNow(0)
+    const { control, messages } = bare({
+      clips: [...FIXTURES, { code: 'third()', id: 'third', title: 'Third' }],
+      now: clockNow.now,
     })
 
-    channel.posted.length = 0
+    control.setTransition(FADE_SPEC)
+    control.choose('loud')
+    control.tick()
+    control.tick()
+    clockNow.set(2000)
+    control.tick()
+
+    messages.length = 0
+    clockNow.set(3000)
+    control.choose('third')
+    expect(control.getSnapshot()).toMatchObject({ chosenClipId: 'third', next: { clipId: 'loud' } })
+    expect(messages).toStrictEqual([])
+
+    clockNow.set(6000)
+    control.tick()
+    expect(control.getSnapshot()).toMatchObject({
+      current: { clipId: 'loud' },
+      firingAt: 8000,
+      next: { clipId: 'third' },
+    })
+    expect(messages).toStrictEqual([{ code: 'third()', kind: 'load', slot: 'a' }])
+
+    clockNow.set(6016)
+    control.tick()
+    clockNow.set(6032)
+    control.tick()
+    clockNow.set(8000)
+    control.tick()
+    expect(switches(messages)).toStrictEqual([{ at: 8000, kind: 'switch', to: 'a', transition: FADE_SPEC }])
+  })
+
+  it('a clip that will not compile costs its own switch and says so, and the show keeps playing', () => {
+    const clockNow = createFakeNow(0)
+    const errors = vi.spyOn(console, 'error').mockReturnValue()
+    const { messages, picture } = fakePicture()
+    const brokenPicture: Picture = {
+      ...picture,
+      load: (slot, code) => {
+        if (code === 'broken()') {
+          throw new SyntaxError('nope')
+        }
+        picture.load(slot, code)
+      },
+    }
+    const control = createControl(brokenPicture, {
+      clips: [...FIXTURES, { code: 'broken()', id: 'broken', title: 'Broken' }],
+      now: clockNow.now,
+      startClipId: 'quiet',
+    })
+    messages.length = 0
+
+    clockNow.set(1000)
     expect(() => {
-      channel.receive({ kind: 'switch', to: 'not-a-slot' })
+      control.choose('broken')
     }).not.toThrow()
-    expect(channel.posted).toStrictEqual([])
+
+    expect(control.getSnapshot()).toMatchObject({
+      armed: false,
+      current: { clipId: 'quiet' },
+      next: undefined,
+    })
+    expect(control.getSnapshot().pictureFault).toContain('Broken did not load')
+
+    control.choose('loud')
+    expect(control.getSnapshot().pictureFault).toBeUndefined()
+    errors.mockRestore()
   })
 
-  it('drives tick from the frame loop and stops on teardown', () => {
-    const channel = new FakeChannel()
-    const scheduler = createFrameScheduler()
-    const { stop } = startControl({
-      cancelFrame: scheduler.cancelFrame,
-      channel: channel as unknown as BroadcastChannel,
-      requestFrame: scheduler.requestFrame,
+  it('a track step that will not compile is tried once, and the show keeps playing where it is', () => {
+    const clockNow = createFakeNow(0)
+    const errors = vi.spyOn(console, 'error').mockReturnValue()
+    const { picture } = fakePicture()
+    let attempts = 0
+    const control = createControl(
+      {
+        ...picture,
+        load: (slot, code) => {
+          if (code === 'broken()') {
+            attempts += 1
+            throw new SyntaxError('nope')
+          }
+          picture.load(slot, code)
+        },
+      },
+      { clips: FIXTURES, now: clockNow.now, startClipId: 'quiet' },
+    )
+
+    control.loadTrack({
+      clips: [{ code: 'broken()', id: 'broken', title: 'Broken' }],
+      id: 'track',
+      steps: [{ bars: 4, clipId: 'broken', transition: CUT_SPEC }],
+      title: 'Set',
+    })
+    for (let frame = 0; frame < 5; frame += 1) {
+      control.tick()
+    }
+
+    expect(attempts).toBe(1)
+    expect(control.getSnapshot()).toMatchObject({ current: { clipId: 'quiet' }, next: undefined })
+    expect(control.getSnapshot().pictureFault).toContain('Broken did not load')
+    errors.mockRestore()
+  })
+
+  it('a frame that throws does not stop the reducer, and is reported once', () => {
+    const clockNow = createFakeNow(0)
+    const errors = vi.spyOn(console, 'error').mockReturnValue()
+    const { picture } = fakePicture()
+    const control = createControl(
+      {
+        ...picture,
+        tick: () => {
+          throw new Error('uniform blew up')
+        },
+      },
+      { now: clockNow.now, startClipId: 'quiet' },
+    )
+
+    control.tick()
+    control.tick()
+
+    expect(control.getSnapshot().pictureFault).toContain('uniform blew up')
+    expect(errors).toHaveBeenCalledOnce()
+    errors.mockRestore()
+  })
+
+  it('Freeze stops drawing and Blackout does not', () => {
+    const clockNow = createFakeNow(0)
+    const { control, ticks } = bare({ now: clockNow.now })
+
+    control.tick()
+    expect(ticks).toHaveLength(1)
+
+    control.freeze()
+    control.tick()
+    expect(ticks).toHaveLength(1)
+
+    control.blackout()
+    expect(control.getSnapshot().panic).toBe('blackout')
+    control.tick()
+    expect(ticks).toHaveLength(2)
+  })
+
+  it('a clip chosen under Freeze fires on the first bar after it lifts and the slot has rendered', () => {
+    const clockNow = createFakeNow(0)
+    const { control, messages } = bare({ now: clockNow.now })
+
+    control.freeze()
+    clockNow.set(1000)
+    control.choose('loud')
+    clockNow.set(4000)
+    control.tick()
+    expect(switches(messages)).toStrictEqual([])
+    expect(control.getSnapshot().current.clipId).toBe('quiet')
+
+    control.freeze()
+    clockNow.set(4016)
+    control.tick()
+    clockNow.set(4032)
+    control.tick()
+    clockNow.set(6000)
+    control.tick()
+    expect(switches(messages)).toStrictEqual([{ at: 6000, kind: 'switch', to: 'b', transition: CUT_SPEC }])
+  })
+
+  it('a panic restored after a reload is in force from the first frame', () => {
+    const { control } = bare({ panic: 'blackout' })
+    expect(control.getSnapshot().panic).toBe('blackout')
+  })
+
+  it('Back reloads the previous clip and waits for it to render before cutting', () => {
+    const clockNow = createFakeNow(0)
+    const { control, messages } = bare({ now: clockNow.now })
+
+    control.stage('loud')
+    control.goNow()
+    control.tick()
+    control.tick()
+    control.tick()
+    expect(control.getSnapshot().current.clipId).toBe('loud')
+
+    messages.length = 0
+    clockNow.set(500)
+    control.back()
+    expect(messages).toStrictEqual([{ code: FIXTURES[0].code, kind: 'load', slot: 'a' }])
+
+    control.tick()
+    expect(switches(messages)).toStrictEqual([])
+    clockNow.set(516)
+    control.tick()
+    expect(switches(messages)).toStrictEqual([{ at: 516, kind: 'switch', to: 'a', transition: CUT_SPEC }])
+  })
+
+  it('Back’s cut waits for the reloaded clip to render even when a candidate is staged at once', () => {
+    const clockNow = createFakeNow(0)
+    const { control, messages } = bare({
+      clips: [...FIXTURES, { code: 'third()', id: 'third', title: 'Third' }],
+      now: clockNow.now,
     })
 
-    scheduler.fire()
-    scheduler.fire()
-    stop()
-    scheduler.fire()
+    control.stage('loud')
+    control.goNow()
+    control.tick()
+    control.tick()
+    control.tick()
+    control.stage('third')
+    control.tick()
+    control.tick()
+    expect(control.getSnapshot()).toMatchObject({ current: { clipId: 'loud', slot: 'b' } })
 
-    expect(channel.closed).toBe(true)
+    messages.length = 0
+    clockNow.set(500)
+    control.back()
+    // What the live screen does the moment a landing or a Back is reported.
+    control.stage('third')
+
+    expect(messages).toStrictEqual([{ code: FIXTURES[0].code, kind: 'load', slot: 'a' }])
+
+    clockNow.set(516)
+    control.tick()
+    expect(switches(messages)).toStrictEqual([])
+    clockNow.set(532)
+    control.tick()
+    expect(messages).toStrictEqual([
+      { code: FIXTURES[0].code, kind: 'load', slot: 'a' },
+      { at: 532, kind: 'switch', to: 'a', transition: CUT_SPEC },
+      { code: 'third()', kind: 'load', slot: 'b' },
+    ])
+    expect(control.getSnapshot().next).toMatchObject({ clipId: 'third', ready: false })
+  })
+
+  it('a staged clip fires two frames after its own load, not after the Back’s', () => {
+    const clockNow = createFakeNow(0)
+    const { control, messages } = bare({ now: clockNow.now })
+
+    control.stage('loud')
+    control.goNow()
+    control.tick()
+    control.tick()
+    control.tick()
+    control.back()
+    control.stage('loud')
+    control.goNow()
+    messages.length = 0
+    // Two frames cut the Back's clip in and load the staged one, two more render it, and the
+    // reducer fires on the frame after that.
+    for (const at of [16, 32, 48, 64]) {
+      clockNow.set(at)
+      control.tick()
+    }
+    expect(switches(messages).map((call) => call.to)).toStrictEqual(['a'])
+
+    clockNow.set(80)
+    control.tick()
+    expect(switches(messages).map((call) => call.to)).toStrictEqual(['a', 'b'])
+  })
+
+  it('a second Back while the first cut is waiting is refused, and says so through canBack', () => {
+    const clockNow = createFakeNow(0)
+    const { control } = bare({
+      clips: [...FIXTURES, { code: 'third()', id: 'third', title: 'Third' }],
+      now: clockNow.now,
+    })
+
+    for (const clipId of ['loud', 'third']) {
+      control.stage(clipId)
+      control.goNow()
+      control.tick()
+      control.tick()
+      control.tick()
+    }
+    control.back()
+
+    expect(control.getSnapshot().canBack).toBe(false)
+    control.back()
+    control.tick()
+    control.tick()
+    expect(control.getSnapshot()).toMatchObject({ canBack: true, current: { clipId: 'loud' } })
   })
 })
 
 /**
  * Track playback. Every assertion here reads the reducer's own state through `getSnapshot()`
- * rather than the message log: the panel and the output window sit downstream of the SAME
- * reducer, so a log that agrees with the panel proves only that both share whatever bug the
- * reducer has. Where a message IS asserted it is because the message carries a value the
- * snapshot does not — the bar a switch was armed for.
+ * rather than the message log: the screen and the picture sit downstream of the SAME reducer, so a log
+ * that agrees with the screen proves only that both share whatever bug the reducer has. Where a
+ * picture call IS asserted it is because the call carries a value the snapshot does not — the bar a
+ * switch fired on.
  */
 const TRACK_CLIPS: readonly PlayableClip[] = [
   { code: 'osc(1).out()', id: 'one', title: 'One' },
   { code: 'osc(2).out()', id: 'two', title: 'Two' },
   { code: 'osc(3).out()', id: 'three', title: 'Three' },
 ]
-
-const CUT_SPEC = { bars: 0, kind: 'cut' } as const
-const FADE_SPEC = { bars: 2, kind: 'crossfade' } as const
 
 const track = (steps: readonly TrackStep[]): LoadedTrack => ({
   clips: TRACK_CLIPS,
@@ -581,16 +728,12 @@ const cutTrack = (bars = 4): LoadedTrack =>
   ])
 
 /** A control wired to a fake clock, with the track's clips known to it and a start clip outside the track. */
-const trackControl = (clockNow: { now: () => number }) => {
-  const messages: OutputMessage[] = []
-  const control = createControl(
-    (message) => {
-      messages.push(message)
-    },
-    { clips: TRACK_CLIPS, now: clockNow.now, startClipId: 'start' },
-  )
-  return { control, messages }
-}
+const trackControl = (clockNow: { now: () => number }) =>
+  setup({
+    clips: [...TRACK_CLIPS, { code: 'osc(9).out()', id: 'start', title: 'Start' }],
+    now: clockNow.now,
+    startClipId: 'start',
+  })
 
 describe('track playback', () => {
   it('staging the first step queues it without putting it on screen', () => {
@@ -678,14 +821,14 @@ describe('track playback', () => {
       ]),
     )
 
-    expect(control.getSnapshot().transitionKind).toBe('cut')
+    expect(control.getSnapshot().transition.kind).toBe('cut')
 
     clockNow.set(500)
     control.go()
     clockNow.set(2000)
     control.tick()
 
-    expect(control.getSnapshot().transitionKind).toBe('crossfade')
+    expect(control.getSnapshot().transition.kind).toBe('crossfade')
   })
 
   it('auto-advances once the item has used up its bars (§7)', () => {
@@ -702,17 +845,19 @@ describe('track playback', () => {
     // four bars, so the next switch must be armed for 10000 — and nobody pressed anything.
     clockNow.set(8000)
     control.tick()
-    expect(messages.at(-1)).toStrictEqual({ at: 10_000, kind: 'switch', to: 'a', transition: CUT_SPEC })
+    expect(control.getSnapshot().firingAt).toBe(10_000)
+    expect(switches(messages).filter((call) => call.at === 10_000)).toStrictEqual([])
 
     clockNow.set(10_000)
     control.tick()
+    expect(switches(messages).at(-1)).toMatchObject({ at: 10_000, transition: CUT_SPEC })
     expect(control.getSnapshot().current.clipId).toBe('two')
     expect(control.getSnapshot().track?.index).toBe(1)
   })
 
   it('measures an item’s bars from the bar its switch FIRED on, not from the end of its crossfade', () => {
     const clockNow = createFakeNow(0)
-    const { control, messages } = trackControl(clockNow)
+    const { control } = trackControl(clockNow)
     control.loadTrack(
       track([
         { bars: 4, clipId: 'one', transition: FADE_SPEC },
@@ -734,7 +879,7 @@ describe('track playback', () => {
     // 14000 instead, and every crossfade in a set would push the track later.
     clockNow.set(8000)
     control.tick()
-    expect(messages.at(-1)).toMatchObject({ at: 10_000, kind: 'switch' })
+    expect(control.getSnapshot().firingAt).toBe(10_000)
   })
 
   it('with auto-advance off, the staged item waits for Go', () => {
@@ -777,8 +922,8 @@ describe('track playback', () => {
 
     const during = control.getSnapshot()
     control.go()
-    control.setTransitionKind('cut')
-    control.queue('three')
+    control.setTransition(CUT_SPEC)
+    control.stage('three')
     control.loadTrack(cutTrack())
 
     const after = control.getSnapshot()
@@ -786,7 +931,7 @@ describe('track playback', () => {
     expect(after).toMatchObject({
       current: during.current,
       next: during.next,
-      transitionKind: 'crossfade',
+      transition: { kind: 'crossfade' },
     })
     expect(after.track).toStrictEqual(during.track)
   })
@@ -844,24 +989,21 @@ describe('track playback', () => {
     expect(control.getSnapshot().track?.index).toBe(1)
   })
 
-  it('re-publishes the armed switch when loading a track changes the transition under it', () => {
+  it('a track loaded under an armed switch brings its own transition to that bar', () => {
     const clockNow = createFakeNow(0)
     const { control, messages } = trackControl(clockNow)
 
-    // A manual pick, armed with a crossfade — the output window has already been told to fade.
-    control.queue('three')
-    control.setTransitionKind('crossfade')
+    control.stage('three')
+    control.setTransition(FADE_SPEC)
     clockNow.set(500)
     control.go()
-    expect(messages.at(-1)).toMatchObject({ kind: 'switch', transition: FADE_SPEC })
 
-    // Loading a track inside that window re-stages the slot with step 0's own transition. The
-    // reducer accepts the change, so the output window must be told, or it executes the fade the
-    // panel no longer believes in.
     control.loadTrack(cutTrack())
+    expect(control.getSnapshot().transition.kind).toBe('cut')
 
-    expect(control.getSnapshot().transitionKind).toBe('cut')
-    expect(messages.at(-1)).toStrictEqual({ at: 2000, kind: 'switch', to: 'b', transition: CUT_SPEC })
+    clockNow.set(2000)
+    control.tick()
+    expect(switches(messages)).toStrictEqual([{ at: 2000, kind: 'switch', to: 'b', transition: CUT_SPEC }])
   })
 
   it('Go now finishing a track fade lands the step before any subscriber hears of it', () => {
@@ -890,23 +1032,12 @@ describe('track playback', () => {
     expect(heard).toStrictEqual([{ current: 'one', index: 0 }])
   })
 
-  it('a manual queue that the reducer accepts leaves the track', () => {
-    const clockNow = createFakeNow(0)
-    const { control } = trackControl(clockNow)
-    control.loadTrack(cutTrack())
-
-    control.queue('three')
-
-    expect(control.getSnapshot().track).toBeUndefined()
-    expect(control.getSnapshot().next?.clipId).toBe('three')
-  })
-
-  it('publishes a load for each staged item, so the output window has its code', () => {
+  it('loads each staged item, so the picture has its code', () => {
     const clockNow = createFakeNow(0)
     const { control, messages } = trackControl(clockNow)
     control.loadTrack(cutTrack())
 
-    expect(messages).toStrictEqual([{ clip: { code: 'osc(1).out()', id: 'one' }, kind: 'load', slot: 'b' }])
+    expect(messages).toStrictEqual([{ code: 'osc(1).out()', kind: 'load', slot: 'b' }])
   })
 
   it('names the clips by title, since a UUID on stage tells the performer nothing', () => {
@@ -926,8 +1057,7 @@ describe('track playback', () => {
   })
 
   it('has no title for a clip the panel was never given, rather than inventing one', () => {
-    const clockNow = createFakeNow(0)
-    const { control } = trackControl(clockNow)
+    const { control } = setup({ clips: TRACK_CLIPS, startClipId: 'start' })
 
     // `startClipId` is 'start', which is in no clip list this control was handed.
     expect(control.getSnapshot().currentTitle).toBeUndefined()
@@ -987,12 +1117,12 @@ describe('what the panel may offer', () => {
 
     expect(snapshot.canGo).toBe(false)
     expect(snapshot.fading).toBe(false)
-    expect(controlHints(snapshot).go).toContain('Nothing is queued')
+    expect(controlHints(snapshot).go).toContain('Nothing is staged')
   })
 
   it('allows Go once something is queued, with nothing to explain', () => {
     const { control } = idle()
-    control.queue('one')
+    control.stage('one')
 
     expect(control.getSnapshot().canGo).toBe(true)
     expect(controlHints(control.getSnapshot()).go).toBeUndefined()
@@ -1000,7 +1130,7 @@ describe('what the panel may offer', () => {
 
   it('refuses a second Go over an armed one, and says why — no fade involved', () => {
     const { clockNow, control } = idle()
-    control.queue('one')
+    control.stage('one')
     clockNow.set(500)
     control.go()
 
@@ -1008,7 +1138,7 @@ describe('what the panel may offer', () => {
     expect(snapshot.fading).toBe(false)
     expect(snapshot.armed).toBe(true)
     expect(snapshot.canGo).toBe(false)
-    expect(controlHints(snapshot).go).toContain('armed')
+    expect(controlHints(snapshot).go).toContain('Armed')
   })
 
   it('mid-fade, refuses Go, queueing and the transition — but not Go now', () => {
@@ -1043,21 +1173,18 @@ describe('what the panel may offer', () => {
     control.tick()
 
     const hints = controlHints(control.getSnapshot())
-    const shown = [hints.back, hints.go, hints.queue, hints.track, hints.transition].filter(
-      (hint) => hint !== undefined,
-    )
-    expect(shown).toHaveLength(5)
+    const shown = [hints.back, hints.go, hints.track, hints.transition].filter((hint) => hint !== undefined)
+    expect(shown).toHaveLength(4)
     expect(shown.every((hint) => hint.includes('Fade in progress'))).toBe(true)
   })
 
   it('explains nothing when everything is available', () => {
     const { control } = idle()
-    control.queue('one')
+    control.stage('one')
 
     expect(controlHints(control.getSnapshot())).toStrictEqual({
       back: 'Nothing to go back to yet.',
       go: undefined,
-      queue: undefined,
       track: undefined,
       transition: undefined,
     })
@@ -1083,6 +1210,7 @@ describe('transport controls', () => {
     control.tick()
 
     expect(messages).toHaveLength(beforeHold)
+    expect(control.getSnapshot().armed).toBe(false)
     expect(control.getSnapshot()).toMatchObject({
       current: { clipId: 'one' },
       held: true,
@@ -1093,7 +1221,7 @@ describe('transport controls', () => {
     clockNow.set(10_001)
     control.tick()
     expect(control.getSnapshot().held).toBe(false)
-    expect(messages.at(-1)).toMatchObject({ at: 12_000, kind: 'switch', to: 'a' })
+    expect(control.getSnapshot().firingAt).toBe(12_000)
   })
 
   it('Back returns to the previous clip and rewinds the track cursor', () => {
@@ -1115,10 +1243,9 @@ describe('transport controls', () => {
     control.back()
 
     expect(control.getSnapshot()).toMatchObject({ current: { clipId: 'one' }, track: { index: 0 } })
-    expect(messages).toMatchObject([
-      { clip: { id: 'one' }, kind: 'load', slot: 'b' },
-      { at: 10_000, kind: 'switch', to: 'b', transition: CUT_SPEC },
-    ])
+    expect(messages).toStrictEqual([{ code: 'osc(1).out()', kind: 'load', slot: 'b' }])
+    control.tick()
+    expect(switches(messages)).toStrictEqual([{ at: 10_000, kind: 'switch', to: 'b', transition: CUT_SPEC }])
   })
 
   it('overriding Next after the last track item leaves the cursor on that item', () => {
@@ -1131,7 +1258,7 @@ describe('transport controls', () => {
     control.tick()
     expect(control.getSnapshot().track).toMatchObject({ index: 0, length: 1, queued: 0 })
 
-    control.overrideNext('two')
+    control.stage('two')
 
     expect(control.getSnapshot().next?.clipId).toBe('two')
     expect(control.getSnapshot().track).toMatchObject({ index: 0, queued: 0 })
@@ -1154,7 +1281,7 @@ describe('transport controls', () => {
     }
     expect(control.getSnapshot()).toMatchObject({ current: { clipId: 'three' }, track: { index: 2 } })
 
-    control.overrideNext('extra')
+    control.stage('extra')
     clockNow.set(6500)
     control.go()
     clockNow.set(8000)
@@ -1189,7 +1316,7 @@ describe('transport controls', () => {
       ['extra-1', 2500, 4000],
       ['extra-2', 4500, 6000],
     ] as const) {
-      control.overrideNext(clipId)
+      control.stage(clipId)
       clockNow.set(pressed)
       control.go()
       clockNow.set(landed)
@@ -1197,10 +1324,13 @@ describe('transport controls', () => {
     }
     expect(control.getSnapshot().current.clipId).toBe('extra-2')
 
+    // Each Back waits for its clip to render before the next is taken, so a frame passes between them.
     control.back()
     expect(control.getSnapshot()).toMatchObject({ current: { clipId: 'extra-1' }, track: { index: 0 } })
+    control.tick()
     control.back()
     expect(control.getSnapshot()).toMatchObject({ current: { clipId: 'one' }, track: { index: 0 } })
+    control.tick()
     control.back()
     expect(control.getSnapshot()).toMatchObject({ current: { clipId: 'start' }, track: undefined })
   })
@@ -1214,7 +1344,7 @@ describe('transport controls', () => {
     clockNow.set(2000)
     control.tick()
 
-    control.overrideNext('three')
+    control.stage('three')
     expect(control.getSnapshot()).toMatchObject({ next: { clipId: 'three' }, track: { index: 0, queued: 1 } })
 
     clockNow.set(2500)
@@ -1225,6 +1355,62 @@ describe('transport controls', () => {
       current: { clipId: 'three' },
       track: { index: 1, queued: 2 },
     })
+  })
+
+  it('taking a choice back puts the track’s own next item back, and the track carries on', () => {
+    const clockNow = createFakeNow(0)
+    const { control, messages } = trackControl(clockNow)
+    control.loadTrack(cutTrack(4))
+    clockNow.set(500)
+    control.go()
+    clockNow.set(2000)
+    control.tick()
+    expect(control.getSnapshot()).toMatchObject({ current: { clipId: 'one' }, next: { clipId: 'two' } })
+
+    clockNow.set(2500)
+    control.choose('three')
+    expect(control.getSnapshot()).toMatchObject({ armed: true, next: { clipId: 'three' } })
+    control.choose('three')
+    control.tick()
+
+    expect(control.getSnapshot()).toMatchObject({
+      armed: false,
+      current: { clipId: 'one' },
+      next: { clipId: 'two' },
+      track: { index: 0, queued: 1 },
+    })
+    expect(switches(messages).filter((call) => call.at >= 2500)).toStrictEqual([])
+
+    // Item one landed on the bar at 2000 and holds four bars: Go arms at 8000 and the switch is on 10000.
+    clockNow.set(8000)
+    control.tick()
+    clockNow.set(10_000)
+    control.tick()
+    expect(control.getSnapshot().current.clipId).toBe('two')
+  })
+
+  it('a Go now held by Freeze starts the step’s clock when it lands, not when it was pressed', () => {
+    const clockNow = createFakeNow(0)
+    const { control } = trackControl(clockNow)
+    control.loadTrack(cutTrack(4))
+
+    control.freeze()
+    clockNow.set(500)
+    control.goNow()
+    clockNow.set(20_000)
+    control.freeze()
+    control.tick()
+
+    expect(control.getSnapshot()).toMatchObject({
+      armed: false,
+      current: { clipId: 'one' },
+      next: { clipId: 'two' },
+      track: { elapsedBars: 0, index: 0 },
+    })
+
+    clockNow.set(20_000 + 3 * 2000)
+    control.tick()
+    expect(control.getSnapshot().armed).toBe(true)
   })
 
   it('a Hold pressed while a switch is armed survives the landing', () => {
@@ -1240,17 +1426,15 @@ describe('transport controls', () => {
     expect(control.getSnapshot()).toMatchObject({ current: { clipId: 'one' }, held: true })
   })
 
-  it('Blackout and Freeze publish their panic state for the output window', () => {
+  it('Blackout and Freeze report their panic state, for the screen to cover the picture', () => {
     const clockNow = createFakeNow(0)
-    const { control, messages } = trackControl(clockNow)
+    const { control } = trackControl(clockNow)
 
     control.blackout()
     expect(control.getSnapshot().panic).toBe('blackout')
-    expect(messages.at(-1)).toStrictEqual({ kind: 'panic', mode: 'blackout' })
 
     control.freeze()
     expect(control.getSnapshot().panic).toBe('freeze')
-    expect(messages.at(-1)).toStrictEqual({ kind: 'panic', mode: 'freeze' })
 
     control.freeze()
     expect(control.getSnapshot().panic).toBe('none')
