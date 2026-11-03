@@ -6,8 +6,9 @@ import type { Clip, EngineKind, NewClip, NewClipOrigin } from '@vev/shared'
 import { clipSchema, newClipSchema } from '@vev/shared'
 import * as v from 'valibot'
 
+import type { Compositor } from './compositor.ts'
+import { createHydraCompositor } from './compositor.ts'
 import { failure } from './library.ts'
-import type { Compositor } from './output-client.ts'
 import { dominantColours, readCanvasPixelsSync, recordThumbnail } from './palette.ts'
 import type { SampledFrame } from './palette.ts'
 import { encodeJpeg, snapshotCanvas, stillMoments, stillSize } from './stills.ts'
@@ -108,7 +109,7 @@ export const buildNewClip = (input: ClipFormInput): NewClip =>
  * validation gate. Declared here, not imported as a value from there, so this module can be
  * imported (and tested) without ever touching `hydra-synth` or `window` — see `runProbe`'s default,
  * which is the only place the real thing is reached, and only via a dynamic import, matching
- * `output-client.ts`'s `defaultCreateCompositor`.
+ * `createHydraCompositor`.
  */
 export type ProbeFn = (code: string, canvas: HTMLCanvasElement) => Promise<ProbeResult>
 
@@ -128,11 +129,6 @@ export const runProbe = async (
   canvas: HTMLCanvasElement,
   probe: ProbeFn = defaultProbe,
 ): Promise<ProbeResult> => await probe(code, canvas)
-
-const defaultCreateCompositor = async (clock: Clock): Promise<Compositor> => {
-  const { HydraCompositor } = await import('@vev/engines/hydra')
-  return new HydraCompositor(clock)
-}
 
 /** Encodes every copied frame, dropping any the browser cannot encode rather than failing the capture. */
 const encodeStills = async (
@@ -203,7 +199,7 @@ export const captureThumbnail = async (
   deps: CaptureThumbnailDeps = {},
 ): Promise<ThumbnailCapture> => {
   const {
-    createCompositor = defaultCreateCompositor,
+    createCompositor = createHydraCompositor,
     encode = encodeJpeg,
     now = Date.now,
     record = recordThumbnail,

@@ -33,6 +33,9 @@ const RECENT_LIMIT = 6
 /** How many of the library's best clips the route may put in front of its model (`limit`, §8.1). */
 const CANDIDATE_LIMIT = 20
 
+/** How many candidates the stage shows (§8.1 returns three). */
+const CARD_LIMIT = 3
+
 /** How many clips are sent as history; spec §8.2's state lists the last five. */
 const HISTORY_LIMIT = 5
 
@@ -41,8 +44,11 @@ export type CandidateLoad = 'idle' | 'loading' | 'ok' | 'stale'
 /** What the screen knows about a clip beyond the candidate result itself. */
 export interface ClipMeta {
   annotationStatus?: AnnotationStatus | undefined
+  /** Only a fetched clip has these two; a library summary carries a licence but no author. */
+  author?: string | undefined
   energy?: ClipEnergy | undefined
   engine?: EngineKind | undefined
+  license?: string | undefined
   reviewed?: boolean | undefined
   thumbnailKey?: string | undefined
   title: string
@@ -97,6 +103,18 @@ export const beginRequest = (state: LiveState, clipId: string): LiveState => ({
   requestedFor: clipId,
 })
 
+/**
+ * A chosen clip is a commitment that outlives the answer it was chosen from: a new answer arriving
+ * before its bar must not take the outlined card off the screen. It stays as the last card.
+ */
+const keepingPick = (candidates: readonly CandidateView[], state: LiveState): readonly CandidateView[] => {
+  const picked = state.candidates.find((candidate) => candidate.clipId === state.pickedClipId)
+  if (picked === undefined || candidates.some((candidate) => candidate.clipId === picked.clipId)) {
+    return candidates
+  }
+  return [...candidates.slice(0, CARD_LIMIT - 1), picked]
+}
+
 /** The answer to the current question, with each candidate joined to what the library knows. */
 export const applyCandidates = (
   state: LiveState,
@@ -124,22 +142,13 @@ export const applyCandidates = (
     }
   })
 
-  const answered: LiveState = {
+  return {
     ...state,
-    candidates,
+    candidates: keepingPick(candidates, state),
     error: undefined,
     load: 'ok',
     suggestedTransition: response.suggestedTransition,
   }
-  const stillOffered =
-    state.pickedClipId === undefined ||
-    candidates.some((candidate) => candidate.clipId === state.pickedClipId)
-  if (stillOffered) {
-    return answered
-  }
-
-  // The pick belongs to the old answer; a transition chosen for it goes with it.
-  return { ...answered, pickedClipId: undefined, transition: undefined }
 }
 
 /**
@@ -196,11 +205,11 @@ export const chooseTransitionManually = (state: LiveState, transition: Transitio
 export interface LiveNext {
   candidateIndex?: number
   clipId: string
-  /** `staged` is a clip the control window holds that no current candidate or track step names. */
+  /** `staged` is a clip the control holds that no current candidate or track step names. */
   source: 'candidate' | 'staged' | 'track'
   title?: string
   transition: TransitionSpec
-  /** `staged` is the transition already set on the control window, which a late answer may not change once Go is armed. */
+  /** `staged` is the transition already set on the control, which a late answer may not change once a switch is armed. */
   transitionFrom: 'locked' | 'performer' | 'rules' | 'staged' | 'suggested' | 'track'
 }
 
@@ -355,7 +364,7 @@ export interface DecisionStatus {
   tone: DecisionTone
 }
 
-/** The top bar's decision dot: which layer produced the candidates, and whether they are current. */
+/** The control row's decision dot: which layer produced the candidates, and whether they are current. */
 export const decisionStatus = (state: LiveState): DecisionStatus => {
   if (state.load === 'stale') {
     return { label: 'stale — keeping the last candidates', tone: 'stale' }
@@ -380,8 +389,8 @@ export const decisionStatus = (state: LiveState): DecisionStatus => {
 export type LiveKeyAction =
   | { kind: 'blackout' }
   | { kind: 'chat' }
-  | { kind: 'close-chat' }
-  | { index: 0 | 1 | 2; kind: 'select-candidate' }
+  | { kind: 'close-panel' }
+  | { index: 0 | 1 | 2; kind: 'choose-candidate' }
   | { kind: 'freeze' }
   | { kind: 'go' }
   | { kind: 'go-now' }
@@ -410,18 +419,18 @@ export const isTextEntry = (target: KeyTarget | undefined): boolean =>
     (target.tagName !== undefined && TEXT_INPUT_TAGS.has(target.tagName.toUpperCase())))
 
 /**
- * Spec §12.1's key map, as data rather than a chain in the template.
+ * Spec §12's key map, as data rather than a chain in the template.
  *
- * While the chat has focus every single-key shortcut is suspended, because those keys are the
- * performer's sentence, not the transport. `Esc` is the exception: it closes the panel rather than
- * freezing the output, which is the one place the same key means two things.
+ * `Esc` closes an open panel before it means Freeze, wherever the focus is. Typing in a field
+ * suspends every single-key shortcut, because those keys are the performer's sentence, not the
+ * transport. A panel that is merely open does not: the show is still running behind it.
  */
 export const keyAction = (
   event: KeyEventLike,
-  options: { chatFocused: boolean; textEntry: boolean },
+  options: { panelOpen: boolean; textEntry: boolean },
 ): LiveKeyAction | undefined => {
-  if (options.chatFocused) {
-    return event.key === 'Escape' ? { kind: 'close-chat' } : undefined
+  if (event.key === 'Escape' && options.panelOpen) {
+    return { kind: 'close-panel' }
   }
   if (options.textEntry || event.ctrlKey === true || event.metaKey === true || event.altKey === true) {
     return undefined
@@ -433,13 +442,13 @@ export const keyAction = (
       return event.shiftKey === true ? { kind: 'go-now' } : { kind: 'go' }
     }
     case '1': {
-      return { index: 0, kind: 'select-candidate' }
+      return { index: 0, kind: 'choose-candidate' }
     }
     case '2': {
-      return { index: 1, kind: 'select-candidate' }
+      return { index: 1, kind: 'choose-candidate' }
     }
     case '3': {
-      return { index: 2, kind: 'select-candidate' }
+      return { index: 2, kind: 'choose-candidate' }
     }
     case 'b':
     case 'B': {
@@ -500,7 +509,7 @@ export interface CreateLiveOptions {
   /** Wall-clock now, per spec: `Date.now()`. */
   now?: () => number
   onChat?: () => void
-  onCloseChat?: () => void
+  onClosePanel?: () => void
 }
 
 export interface Live {
@@ -512,10 +521,10 @@ export interface Live {
   /** Turns a sentence into a standing direction and asks for new candidates. Never moves the show. */
   interpret: (text: string) => void
   /** Handles one key event; returns true when it consumed the key. */
-  key: (event: KeyEventLike & { target?: KeyTarget }, options: { chatFocused: boolean }) => boolean
-  /** The performer's candidate choice, which replaces Next. */
+  key: (event: KeyEventLike & { target?: KeyTarget }, options: { panelOpen: boolean }) => boolean
+  /** The performer's candidate choice: arms the switch for the next bar (§7). */
   pickCandidate: (clipId: string) => void
-  /** The track the control window is playing, or `undefined` once it leaves one. */
+  /** The track being played, or `undefined` once it leaves one. */
   setTrack: (track: LiveTrack | undefined) => void
   stop: () => void
   subscribe: (listener: (view: LiveView) => void) => () => void
@@ -544,21 +553,27 @@ const toPlayable = (clip: Clip): PlayableClip => ({ code: clip.code, id: clip.id
  */
 const toMeta = (clip: Clip): ClipMeta => ({
   annotationStatus: clip.annotationStatus,
+  author: clip.author,
   energy: clip.energy,
   engine: clip.engine,
+  license: clip.license,
   reviewed: clip.reviewed,
   thumbnailKey: clip.thumbnailKey,
   title: clip.title,
   usesFeedback: clip.deps.usesFeedback,
 })
 
+/** A pick stands while it is staged or held through a fade. A landing, a Back or a clip that would not load all end it. */
+const pickStands = (control: ControlSnapshot, clipId: string): boolean =>
+  control.next?.clipId === clipId || control.chosenClipId === clipId
+
 /**
- * Wires the candidate pipeline to the control window.
+ * Wires the candidate pipeline to the control.
  *
  * One request goes out when the screen opens and after every landing (spec §8.3: "right after A
  * starts"), and immediately when the direction changes. A landing also moves the old clip into
  * history and consumes the transition that brought it in, which is what the variety rule reads.
- * Nothing here ever calls `go`; the chat and the candidate list steer, the performer switches.
+ * The chat never moves the show; a candidate only does when the performer chooses it.
  */
 export const createLive = (options: CreateLiveOptions): Live => {
   const {
@@ -570,7 +585,7 @@ export const createLive = (options: CreateLiveOptions): Live => {
     onChat = () => {
       // No chat surface attached — the key is still consumed elsewhere.
     },
-    onCloseChat = () => {
+    onClosePanel = () => {
       // Same.
     },
   } = options
@@ -683,7 +698,7 @@ export const createLive = (options: CreateLiveOptions): Live => {
   }
 
   /**
-   * Brings the control window's staged Next and transition in line with what the screen shows.
+   * Brings the control's staged Next and transition in line with what the screen shows.
    *
    * Once a switch is armed it is committed: an answer that merely arrived late, or a track step
    * that came due, must not swap the clip that is about to go live. The performer's own pick or
@@ -713,7 +728,7 @@ export const createLive = (options: CreateLiveOptions): Live => {
         control.setTransition(transition)
       }
       if (!sameClip) {
-        control.overrideNext(desired.clipId)
+        control.stage(desired.clipId)
       }
     } finally {
       syncing = false
@@ -721,10 +736,9 @@ export const createLive = (options: CreateLiveOptions): Live => {
   }
 
   /**
-   * What will play, as the control window holds it. The screen's own idea of Next
-   * (`desiredNext`) is only what it wants staged: once a switch is armed, or while a fade is
-   * running, the control window refuses the change, and showing the wish would name a clip that is
-   * not the one about to go live.
+   * What will play, as the control holds it. The screen's own idea of Next (`desiredNext`) is only
+   * what it wants staged: once a switch is armed, or while a fade is running, the control refuses
+   * the change, and showing the wish would name a clip that is not the one about to go live.
    */
   const stagedNext = (): LiveNext | undefined => {
     const staged = controlSnapshot.next
@@ -814,7 +828,9 @@ export const createLive = (options: CreateLiveOptions): Live => {
         return
       }
 
-      await ensureClips(response.candidates.map((candidate) => candidate.clipId))
+      // The clip on screen too, when the library knows it: the credit overlay needs its author.
+      const onScreen = summaries.has(current) ? [current] : []
+      await ensureClips([...onScreen, ...response.candidates.map((candidate) => candidate.clipId)])
       if (stopped || requestId !== live.requestId) {
         return
       }
@@ -836,6 +852,13 @@ export const createLive = (options: CreateLiveOptions): Live => {
     }
   }
 
+  const dropEndedPick = (snapshotNext: ControlSnapshot): void => {
+    const { pickedClipId } = live
+    if (pickedClipId !== undefined && !pickStands(snapshotNext, pickedClipId)) {
+      live = { ...live, pickedClipId: undefined, transition: undefined }
+    }
+  }
+
   const onControl = (snapshotNext: ControlSnapshot): void => {
     controlSnapshot = snapshotNext
 
@@ -844,12 +867,40 @@ export const createLive = (options: CreateLiveOptions): Live => {
       void request()
     } else if (lastCurrent !== snapshotNext.current.clipId) {
       live = recordArrival(live, lastCurrent, (snapshotNext.arrivedBy ?? snapshotNext.transition).kind)
-      live = { ...live, pickedClipId: undefined, transition: undefined }
+      live = { ...live, transition: undefined }
       lastCurrent = snapshotNext.current.clipId
       void request()
     }
 
-    syncNext({ performer: false })
+    // Mid-`choose` the pick is not staged yet, and `choose` looks again when it has finished.
+    if (!syncing) {
+      dropEndedPick(snapshotNext)
+    }
+
+    // An armed pick is the performer's own act, so its transition still follows the rules: a choice
+    // held through a fade could not set one until now, and what it fades from has just changed.
+    syncNext({ performer: live.pickedClipId !== undefined })
+    notify()
+  }
+
+  const choose = (clipId: string): void => {
+    if (clipId === controlSnapshot.current.clipId) {
+      return
+    }
+
+    live = pickCandidate(live, clipId)
+    syncing = true
+    try {
+      const desired = desiredNext()
+      if (desired !== undefined) {
+        // Refused mid-fade; `onControl` applies it on the landing.
+        control.setTransition(desired.transition)
+      }
+      control.choose(clipId)
+    } finally {
+      syncing = false
+    }
+    dropEndedPick(control.getSnapshot())
     notify()
   }
 
@@ -881,7 +932,7 @@ export const createLive = (options: CreateLiveOptions): Live => {
     },
     key: (event, keyOptions) => {
       const action = keyAction(event, {
-        chatFocused: keyOptions.chatFocused,
+        panelOpen: keyOptions.panelOpen,
         textEntry: isTextEntry(event.target),
       })
       if (action === undefined) {
@@ -897,8 +948,8 @@ export const createLive = (options: CreateLiveOptions): Live => {
           onChat()
           return true
         }
-        case 'close-chat': {
-          onCloseChat()
+        case 'close-panel': {
+          onClosePanel()
           return true
         }
         case 'freeze': {
@@ -917,17 +968,12 @@ export const createLive = (options: CreateLiveOptions): Live => {
           control.hold()
           return true
         }
-        case 'select-candidate': {
+        case 'choose-candidate': {
           const candidate = live.candidates[action.index]
           if (candidate === undefined) {
             return false
           }
-          if (!controlSnapshot.canQueue) {
-            return true
-          }
-          live = pickCandidate(live, candidate.clipId)
-          syncNext({ performer: true })
-          notify()
+          choose(candidate.clipId)
           return true
         }
         default: {
@@ -936,12 +982,9 @@ export const createLive = (options: CreateLiveOptions): Live => {
       }
     },
     pickCandidate: (clipId) => {
-      if (!controlSnapshot.canQueue || !live.candidates.some((candidate) => candidate.clipId === clipId)) {
-        return
+      if (live.candidates.some((candidate) => candidate.clipId === clipId)) {
+        choose(clipId)
       }
-      live = pickCandidate(live, clipId)
-      syncNext({ performer: true })
-      notify()
     },
     setTrack: (next) => {
       track = next

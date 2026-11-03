@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-import type { Clock, PanicMode, PlaybackState } from '@vev/engines'
+import type { Clock, PanicMode, PlaybackEvent, PlaybackState } from '@vev/engines'
 import {
   barDurationMs,
   barPhase,
@@ -15,9 +15,7 @@ import {
   panicMode,
   reduce,
 } from '@vev/engines'
-import { DEFAULT_TRANSITION, OUTPUT_CHANNEL, outputMessageSchema } from '@vev/shared'
-import type { OutputMessage, Slot, TransitionKind, TransitionSpec } from '@vev/shared'
-import * as v from 'valibot'
+import type { Slot, TransitionSpec } from '@vev/shared'
 
 /**
  * A tap arriving within this many milliseconds of its predecessor is treated
@@ -34,9 +32,35 @@ const TAP_RESET_MS = 2000
 
 const CUT: TransitionSpec = { bars: 0, kind: 'cut' }
 
+/**
+ * Frames a freshly loaded slot must render before anything may cut to it. Hydra samples a buffer's
+ * previous pass, so the first two frames after a load read black, or the clip the slot last held
+ * (measured in a browser, ADR 0012).
+ */
+const READY_FRAMES = 2
+
+/**
+ * How often an uneventful frame tells subscribers. The picture and the screen share one thread now,
+ * so the readouts that move every frame (bar phase, the countdown) do not get a render per frame.
+ * Anything that changes state still notifies at once.
+ */
+const VIEW_INTERVAL_MS = 100
+
 type Loaded = PlaybackState['current']
 
-/** A clip the panel can actually put on screen. `code` is what a `load` message carries; the panel never fetches it itself. */
+/**
+ * What the control asks of the picture: `HydraCompositor` on the stage, a fake in tests. Every call
+ * follows a decision the reducer has already made, on the frame it made it, so the picture holds no
+ * schedule of its own and has nothing to disagree about (ADR 0004, ADR 0012).
+ */
+export interface Picture {
+  /** Compiles a clip into a buffer. Throws when the code does not compile. */
+  load: (slot: Slot, code: string) => void
+  switchTo: (slot: Slot, spec: TransitionSpec, at: number) => void
+  tick: (now: number) => void
+}
+
+/** A clip the control can actually put on screen. It never fetches code itself. */
 export interface PlayableClip {
   readonly code: string
   readonly id: string
@@ -112,23 +136,32 @@ export interface ControlSnapshot {
   canSetTransition: boolean
   /** Whether Back has a previous clip to return to, from the reducer's own predicate. */
   canBack: boolean
+  /** A choice held through a running fade, armed when it lands. */
+  chosenClipId: string | undefined
+  /** The source of the clip on screen, for the code overlay. */
+  code: string | undefined
   current: Loaded
   /** The clip on screen, by name. `undefined` only for a start clip the panel was never given — an id is not a name, and a UUID on stage tells the performer nothing. */
   currentTitle: string | undefined
-  /** True while a crossfade is running. `go`, `queue` and `setTransitionKind` are all refused during it; `goNow` is not refused — it finishes the fade immediately instead. See `playback.ts`'s `fading` guards. */
+  /** True while a crossfade is running. `go`, `stage` and `setTransition` are all refused during it; `goNow` finishes the fade, and `choose` waits for its landing. */
   fading: boolean
+  /** The wall-clock moment an armed switch fires, which may move if its clip is not ready by then. */
+  firingAt: number | undefined
   /** Hold is on: auto-advance is paused, and the clip on screen keeps playing (spec §7). */
   held: boolean
   next: Loaded | undefined
   /** The queued clip, by name. See `currentTitle`. */
   nextTitle: string | undefined
+  /** `now()` when this snapshot was taken, so a countdown can be read from it. */
+  now: number
   /** Output-wide panic. `none` is normal; the two panic buttons toggle between them. */
   panic: PanicMode
+  /** The last thing the picture refused: a clip that would not compile, or a frame that threw. The show keeps playing what it has. */
+  pictureFault: string | undefined
   /** The loaded track, or `undefined` when the panel is not playing one. */
   track: TrackSnapshot | undefined
   /** What Go/Go now will arm next, including how many bars it lasts. */
   transition: TransitionSpec
-  transitionKind: TransitionKind
 }
 
 /**
@@ -144,7 +177,6 @@ export interface ControlSnapshot {
 export interface ControlHints {
   back: string | undefined
   go: string | undefined
-  queue: string | undefined
   track: string | undefined
   transition: string | undefined
 }
@@ -152,9 +184,6 @@ export interface ControlHints {
 const FADE_RUNNING = 'Fade in progress'
 
 export const controlHints = (snapshot: ControlSnapshot): ControlHints => {
-  const queue = snapshot.canQueue
-    ? undefined
-    : `${FADE_RUNNING} — queueing is unavailable until it completes.`
   const track = snapshot.canQueue
     ? undefined
     : `${FADE_RUNNING} — a track can't be loaded until it completes.`
@@ -177,68 +206,66 @@ export const controlHints = (snapshot: ControlSnapshot): ControlHints => {
   } else if (snapshot.armed) {
     // Not a fault, but still a reason the button is dead: the reducer refuses a second Go over an
     // armed one, and without this the panel would look broken between the press and the bar.
-    go = 'Go is armed — the switch fires on the next bar.'
+    go = 'Armed — the switch fires on the next bar.'
   } else if (!snapshot.canGo) {
-    go = 'Nothing is queued — load a track or wait for a candidate before Go.'
+    go = 'Nothing is staged — load a track or wait for a candidate.'
   }
 
-  return { back, go, queue, track, transition }
+  return { back, go, track, transition }
 }
 
 export interface CreateControlOptions {
-  /** Every clip the panel may put on screen, by id. Defaults to `FIXTURES`; `loadTrack` adds a track's own clips to whatever is here. */
+  /** Every clip the control may put on screen, by id. Defaults to `FIXTURES`; `loadTrack` adds a track's own clips to whatever is here. */
   clips?: readonly PlayableClip[]
+  /** The one clock: the reducer reads it, the compositor fades against it, and `tap` moves it in place. */
+  clock?: Clock
   /** Wall-clock now, per spec: `Date.now()`, never `performance.now()`. */
   now?: () => number
+  /** Panic restored after a reload (`client/show-memory.ts`). */
+  panic?: PanicMode
   /** The clip shown in slot `a` before anything is queued. Defaults to the second fixture. */
   startClipId?: string
 }
 
 export interface Control {
-  /** Registers clips the panel may play, without queueing one. The live screen adds candidate clips this way once it has fetched their code. */
+  /** Registers clips the control may play, without queueing one. The live screen adds candidate clips this way once it has fetched their code. */
   addClips: (clips: readonly PlayableClip[]) => void
   /** Returns to the previous clip, reloading its code into the free buffer. Refused with no history or mid-fade. */
   back: () => void
   /** Toggles output-wide blackout (spec §7). Independent of freeze. */
   blackout: () => void
-  /** Reads the current state; only for callers that don't need to react to changes. */
-  getSnapshot: () => ControlSnapshot
-  /** Toggles a held frame. The show keeps running behind it; only freeze pauses rendering. */
-  freeze: () => void
-  /** Publishes clock, load, switch and panic messages that restore the output to what it's showing. Call on `hello`. */
-  handleHello: () => void
-  /** Toggles Hold: pause auto-advance without stopping the current clip. Go releases it. */
-  hold: () => void
-  /** Fires the queued clip on the next bar. Does nothing if nothing is queued, Go is already armed, or a fade is running. */
-  go: () => void
-  /** Fires the queued clip immediately, or — mid-fade — finishes that fade immediately. Does nothing if neither applies. */
-  goNow: () => void
+  /**
+   * The performer's choice: arms `clipId` for the next bar, replaces an armed choice on the same
+   * bar, and waits for the landing during a fade. Keeps the track's cursor, so auto-advance resumes
+   * after the item the clip replaced (spec §7).
+   */
+  choose: (clipId: string) => void
   /** Forgets the loaded track. What is on screen keeps playing — §0: never stop the show. */
   clearTrack: () => void
-  /** Loads a resolved track and stages its first step. Refused while a fade is running, the same as `queue`. */
+  /** Toggles a held frame. The show keeps running behind it; only freeze pauses rendering. */
+  freeze: () => void
+  /** Reads the current state; only for callers that don't need to react to changes. */
+  getSnapshot: () => ControlSnapshot
+  /** Arms what is staged for the next bar. Does nothing if nothing is staged, a switch is already armed, or a fade is running. */
+  go: () => void
+  /** Fires what is staged immediately, or — mid-fade — finishes that fade immediately. Does nothing if neither applies. */
+  goNow: () => void
+  /** Toggles Hold: pause auto-advance without stopping the current clip. Go releases it. */
+  hold: () => void
+  /** Loads a resolved track and stages its first step. Refused while a fade is running. */
   loadTrack: (track: LoadedTrack) => void
-  /**
-   * Stages `clipId` as the next switch but KEEPS the loaded track's cursor, so auto-advance
-   * resumes at the item after the one on screen. This is the candidate screen's pick: spec §7 says
-   * a candidate is an alternative to the track's next item, not an exit from the track.
-   */
-  overrideNext: (clipId: string) => void
-  /** Queues `clipId` into the free slot, publishing a `load` for it. Refused while a fade is running. Clears any loaded track — see its doc comment. */
-  queue: (clipId: string) => void
   /** Turns auto-advance on or off (spec §7). With it off, the next step stays staged and waits for Go. */
   setAutoAdvance: (on: boolean) => void
-  /** Sets the transition Go/Go now will arm next, bars included. Refused while a fade is running. */
+  /** Sets the transition the next switch uses, bars included. Refused while a fade is running. */
   setTransition: (transition: TransitionSpec) => void
-  /** Sets the transition Go/Go now will arm next. Refused while a fade is running — it would either end the running fade early or desync it from what the output is blending. */
-  setTransitionKind: (kind: TransitionKind) => void
+  /** Stages `clipId` as the default next clip without arming anything. Keeps the track's cursor, as `choose` does. */
+  stage: (clipId: string) => void
   subscribe: (listener: (snapshot: ControlSnapshot) => void) => () => void
-  /** Records a tap; once enough taps have accumulated, updates and publishes the tempo. */
+  /** Records a tap; once enough taps have accumulated, updates the tempo. */
   tap: () => void
-  /** Advances local timers (fade completion, the bar-phase readout). Call from a frame loop. */
+  /** One frame: advances the reducer, the track and the picture. */
   tick: () => void
 }
-
-const transitionFor = (kind: TransitionKind): TransitionSpec => (kind === 'cut' ? CUT : DEFAULT_TRANSITION)
 
 /**
  * The track cursor. Everything about what is playing still lives in `PlaybackState` — the reducer
@@ -247,7 +274,7 @@ const transitionFor = (kind: TransitionKind): TransitionSpec => (kind === 'cut' 
  * can measure the step's `bars` from the bar it actually started on.
  */
 interface TrackRun {
-  /** The `at` of the switch currently armed, kept so `startedAt` is the bar the step LANDED on, not the tick that noticed. */
+  /** The moment the switch now landing fired, kept so `startedAt` is the bar the step LANDED on, not the tick that noticed. */
   armedAt: number | undefined
   autoAdvance: boolean
   /**
@@ -258,34 +285,34 @@ interface TrackRun {
   beyond: number
   /** The step on screen, or -1 before the first one has landed. */
   index: number
-  /** The slot the staged step was loaded into: how a landing is detected, since two steps may name the same clip. */
-  pendingSlot: Slot | undefined
-  /** The staged clip is a pick made after the last item, so landing it moves `beyond` and not `index`. */
-  pendingBeyond: boolean
+  /** What the staged clip is to the track when it lands: its `queued` step, or a pick after the last item. */
+  pending: 'beyond' | 'none' | 'step'
   /** The step staged as `next`; equal to `index` when nothing is staged. */
   queued: number
   startedAt: number | undefined
   track: LoadedTrack
 }
 
-/** True exactly when `before` had no armed switch and `after` does — the moment Go or Go now just armed one. */
-const newlyArmed = (before: PlaybackState, after: PlaybackState): boolean =>
-  !before.firing && after.firing !== undefined && after.next !== undefined
-
-export const createControl = (
-  publish: (message: OutputMessage) => void,
-  options: CreateControlOptions = {},
-): Control => {
+export const createControl = (picture: Picture, options: CreateControlOptions = {}): Control => {
   const now = options.now ?? Date.now
   const startClipId = options.startClipId ?? FIXTURES[1].id
 
-  let clock: Clock = { beatsPerBar: 4, bpm: 120, downbeatAt: now() }
-  let state: PlaybackState = initialPlayback(startClipId, CUT)
+  const clock: Clock = options.clock ?? { beatsPerBar: 4, bpm: 120, downbeatAt: now() }
+  let state: PlaybackState =
+    options.panic === undefined || options.panic === 'none'
+      ? initialPlayback(startClipId, CUT)
+      : { ...initialPlayback(startClipId, CUT), panic: options.panic }
   let taps: number[] = []
   const listeners = new Set<(snapshot: ControlSnapshot) => void>()
   const clipsById = new Map<string, PlayableClip>((options.clips ?? FIXTURES).map((clip) => [clip.id, clip]))
 
   let run: TrackRun | undefined
+  let framesSinceLoad = 0
+  let pictureFault: string | undefined
+  /** A Back's cut, waiting for the buffer it just reloaded to render. */
+  let backCut: Slot | undefined
+  let notifiedState: PlaybackState | undefined
+  let notifiedAt = Number.NEGATIVE_INFINITY
 
   const snapshot = (): ControlSnapshot => {
     const at = now()
@@ -310,13 +337,18 @@ export const createControl = (
       canGoNow: canGoNow(state),
       canQueue: canQueue(state),
       canSetTransition: canSetTransition(state),
+      chosenClipId: state.chosen,
+      code: clipsById.get(state.current.clipId)?.code,
       current: state.current,
       currentTitle: clipsById.get(state.current.clipId)?.title,
       fading: state.fading !== undefined,
+      firingAt: state.firing?.at,
       held: isHeld(state),
       next: state.next,
       nextTitle: state.next === undefined ? undefined : clipsById.get(state.next.clipId)?.title,
+      now: at,
       panic: panicMode(state),
+      pictureFault,
       track:
         run === undefined
           ? undefined
@@ -330,60 +362,113 @@ export const createControl = (
               title: run.track.title,
             },
       transition: state.transition,
-      transitionKind: state.transition.kind,
     }
-  }
-
-  /**
-   * Notices that the staged step has landed, by the SLOT it was loaded into rather than by its
-   * clip id: a track may legitimately name the same clip twice in a row, and comparing ids would
-   * then read the switch as having already happened before it did. The reducer alternates slots on
-   * every queue, so the slot is unambiguous.
-   */
-  const noticeLanding = (): void => {
-    if (run === undefined || run.pendingSlot === undefined) {
-      return
-    }
-    if (state.next !== undefined || state.current.slot !== run.pendingSlot) {
-      return
-    }
-
-    if (run.pendingBeyond) {
-      run.beyond += 1
-    } else {
-      run.index = run.queued
-    }
-    run.startedAt = run.armedAt ?? now()
-    run.armedAt = undefined
-    run.pendingSlot = undefined
-    run.pendingBeyond = false
   }
 
   const notify = (): void => {
-    // A landing the reducer completed synchronously (Go now over a fade) has to move the cursor
-    // before anyone is told, or a subscriber stages the step that just landed all over again.
-    noticeLanding()
+    notifiedState = state
+    notifiedAt = now()
     const current = snapshot()
     for (const listener of listeners) {
       listener(current)
     }
   }
 
-  const publishLoad = (loaded: Loaded): void => {
+  /** A clip that will not compile costs its own switch and nothing else: the show keeps what it has (§0). */
+  const loadSlot = (loaded: Loaded): boolean => {
     const clip = clipsById.get(loaded.clipId)
-    if (!clip) {
+    if (clip === undefined) {
+      return false
+    }
+
+    if (backCut !== undefined) {
+      // The new load takes the slot on screen, so the waiting cut has to happen first.
+      picture.switchTo(backCut, CUT, now())
+      backCut = undefined
+    }
+    try {
+      picture.load(loaded.slot, clip.code)
+    } catch (error) {
+      console.error(`vev: clip ${loaded.clipId} did not load`, error)
+      pictureFault = `${clip.title} did not load: ${error instanceof Error ? error.message : String(error)}`
+      return false
+    }
+    framesSinceLoad = 0
+    pictureFault = undefined
+    return true
+  }
+
+  /** A switch the reducer fired, or a Go now that ended a fade early, reaching the picture on that frame. */
+  const projectSwitch = (before: PlaybackState, event: PlaybackEvent): void => {
+    if (state.fading && !before.fading) {
+      picture.switchTo(state.fading.to, state.transition, state.fading.startedAt)
+    } else if (before.firing && state.current !== before.current) {
+      picture.switchTo(state.current.slot, state.transition, before.firing.at)
+    } else if (event.kind === 'go-now' && before.fading && state.current !== before.current) {
+      picture.switchTo(state.current.slot, CUT, event.now)
+    }
+  }
+
+  /** Overriding item N makes the override the step after N. With no item after N, the cursor stays on N and counts the pick as beyond the end. */
+  const markOverride = (): void => {
+    if (run === undefined) {
+      return
+    }
+    if (run.track.steps[run.index + 1] === undefined) {
+      run.pending = 'beyond'
+    } else {
+      run.queued = run.index + 1
+      run.pending = 'step'
+    }
+  }
+
+  /**
+   * Moves the track cursor when a switch lands, by what the reducer did rather than by comparing
+   * clip ids: a track may name the same clip twice in a row. Measured from the bar the switch fired
+   * on — not the tick that noticed it complete — or a crossfade's duration would be charged to every
+   * step and the track would drift later and later.
+   */
+  const followTrack = (before: PlaybackState): void => {
+    if (run === undefined) {
+      return
+    }
+    if (before.firing && !state.firing) {
+      run.armedAt = state.fading?.startedAt ?? before.firing.at
+    }
+    if (state.current !== before.current) {
+      if (run.pending === 'beyond') {
+        run.beyond += 1
+      } else if (run.pending === 'step') {
+        run.index = run.queued
+      }
+      run.startedAt = run.armedAt ?? now()
+      run.armedAt = undefined
+      run.pending = 'none'
+      if (before.chosen !== undefined && state.next !== undefined) {
+        markOverride()
+      }
+    }
+  }
+
+  /**
+   * Every change to playback passes through here: the reducer decides, then the picture and the
+   * track cursor follow from the difference. Nothing else calls `picture.switchTo` for a switch, so
+   * a decision cannot reach the screen early or twice.
+   */
+  const dispatch = (event: PlaybackEvent): void => {
+    const before = state
+    state = reduce(state, event, clock)
+    if (state === before) {
       return
     }
 
-    publish({ clip: { code: clip.code, id: clip.id }, kind: 'load', slot: loaded.slot })
-  }
+    projectSwitch(before, event)
+    followTrack(before)
 
-  const publishClock = (): void => {
-    publish({ beatsPerBar: clock.beatsPerBar, bpm: clock.bpm, downbeatAt: clock.downbeatAt, kind: 'clock' })
-  }
-
-  const publishPanic = (): void => {
-    publish({ kind: 'panic', mode: panicMode(state) })
+    const { next } = state
+    if (next && (before.next?.clipId !== next.clipId || before.next.slot !== next.slot) && !loadSlot(next)) {
+      state = reduce(state, { kind: 'unstage' }, clock)
+    }
   }
 
   const addClips = (clips: readonly PlayableClip[]): void => {
@@ -392,163 +477,69 @@ export const createControl = (
     }
   }
 
-  const queue = (clipId: string): void => {
+  const stage = (clipId: string): void => {
     if (!clipsById.has(clipId)) {
       return
     }
 
     const before = state
-    state = reduce(state, { clipId, kind: 'select-next' }, clock)
-    const { next } = state
-    const changed =
-      next !== undefined && (before.next?.clipId !== next.clipId || before.next.slot !== next.slot)
-    if (next && changed) {
-      publishLoad(next)
-    }
-
-    // A manual pick that the reducer ACCEPTED leaves the track. The alternative — keeping the
-    // cursor and letting the next tick re-stage the track's own step over the top — would make
-    // the manual pick vanish a frame after the press, which is exactly the silent swallow the M1
-    // `fading` rulings exist to forbid. Picking the track again resumes it from its first step.
-    //
-    // Gated on the reducer having actually done something (`reduce` returns the state object
-    // unchanged when it refuses), so a press refused mid-fade does not quietly drop the track
-    // as a side effect of a control that visibly did nothing.
-    if (state !== before) {
-      run = undefined
+    dispatch({ clipId, kind: 'select-next' })
+    if (state !== before && state.next !== undefined) {
+      markOverride()
     }
     notify()
   }
 
-  /**
-   * The performer's pick, as an alternative to the track's own next item (spec §7). It stages the
-   * clip but keeps `run` alive, so auto-advance carries on at the item AFTER the one on screen
-   * instead of stopping the track dead. `queue` above is the other behaviour, kept for callers
-   * that really do mean to leave the track.
-   */
-  const overrideNext = (clipId: string): void => {
+  const choose = (clipId: string): void => {
     if (!clipsById.has(clipId)) {
       return
     }
 
-    const before = state
-    state = reduce(state, { clipId, kind: 'select-next' }, clock)
-    if (state === before) {
-      return
-    }
-
-    const staged = state.next
-    const changed =
-      staged !== undefined && (before.next?.clipId !== staged.clipId || before.next.slot !== staged.slot)
-    if (staged && changed) {
-      publishLoad(staged)
-    }
-
-    // Overriding item N makes the override the step after N. `noticeLanding` advances `index`
-    // to this value when it lands, so the following tick stages item N+2 as usual. With no item
-    // after N there is nothing to override: the cursor stays on the last item rather than
-    // running past the end of the track, where the timeline would highlight nothing.
-    if (run && run.track.steps[run.index + 1] !== undefined) {
-      run.queued = run.index + 1
-      run.pendingSlot = staged?.slot
-      run.pendingBeyond = false
-    } else if (run) {
-      run.pendingSlot = staged?.slot
-      run.pendingBeyond = true
+    dispatch({ clipId, kind: 'choose', now: now() })
+    // During a fade the choice is only held; `followTrack` marks it when it lands.
+    if (!state.fading && state.next !== undefined) {
+      markOverride()
     }
     notify()
   }
 
   const go = (): void => {
-    const before = state
-    state = reduce(state, { kind: 'go', now: now() }, clock)
-    if (newlyArmed(before, state) && state.firing && state.next) {
-      publish({ at: state.firing.at, kind: 'switch', to: state.next.slot, transition: state.transition })
-      // The bar this switch lands on is what a track step's `bars` is measured from — not the tick
-      // that later notices the switch completed. Measuring from the tick would let a crossfade's
-      // own duration be charged to every step, and the track would drift later and later.
-      if (run) {
-        run.armedAt = state.firing.at
-      }
-    }
+    dispatch({ kind: 'go', now: now() })
     notify()
   }
 
   const goNow = (): void => {
-    const before = state
-    const at = now()
-
-    if (before.fading) {
-      // Finishing a running fade snaps the output to its target immediately — a
-      // press that did nothing here would silently swallow it (see playback.ts's
-      // `go-now` case). The local reducer completes the switch outright, so the
-      // output window is told the same thing: an instant cut to the fade's target.
-      state = reduce(state, { kind: 'go-now', now: at }, clock)
-      publish({ at, kind: 'switch', to: before.fading.to, transition: CUT })
-      notify()
-      return
-    }
-
-    state = reduce(state, { kind: 'go-now', now: at }, clock)
-    if (newlyArmed(before, state) && state.firing && state.next) {
-      publish({ at: state.firing.at, kind: 'switch', to: state.next.slot, transition: state.transition })
-      if (run) {
-        run.armedAt = state.firing.at
-      }
-    }
+    dispatch({ kind: 'go-now', now: now() })
     notify()
   }
 
   const setTransition = (transition: TransitionSpec): void => {
-    // `reduce` refuses this outright while a fade is running (see
-    // `playback.ts`'s `set-transition` case) — `state.transition` then comes
-    // back unchanged and nothing below fires, so the panel neither ends the
-    // running fade early nor desyncs from what the output is blending.
-    const before = state
-    state = reduce(state, { kind: 'set-transition', transition }, clock)
-    if (state === before) {
-      return
-    }
-
-    // A performer changing their mind between Go and the bar landing is
-    // legitimate — the surface that would forbid it (locking the toggle
-    // once armed) is worse than the one that re-publishes. The already-sent
-    // `switch` carried the old transition; without this, the panel would
-    // show the new kind while the output window executes the old one.
-    // Re-publishing with the *same* `at` relies on the output side
-    // superseding cleanly, not queuing behind or double-applying — see
-    // `output-client.ts`'s `startOutput` doc comment.
-    if (state.firing && state.next) {
-      publish({ at: state.firing.at, kind: 'switch', to: state.next.slot, transition: state.transition })
-    }
+    // Refused while a fade is running (see `playback.ts`). An armed switch reads the transition when
+    // it fires, so a change between the press and the bar needs nothing more than this.
+    dispatch({ kind: 'set-transition', transition })
     notify()
   }
 
-  const setTransitionKind = (kind: TransitionKind): void => {
-    setTransition(transitionFor(kind))
-  }
-
   const hold = (): void => {
-    state = reduce(state, { kind: 'hold' }, clock)
+    dispatch({ kind: 'hold' })
     notify()
   }
 
   /**
-   * Returns to the previous clip. The reducer supplies the target and its free buffer, but the
-   * control is the only side holding every clip's code, so it re-publishes a `load` before cutting:
-   * two buffers cannot hold an arbitrarily deep history, and a Back that silently showed an old
-   * frame from the other buffer would be a different clip from the one the panel names.
+   * Returns to the previous clip. The reducer supplies the target and its free buffer, and the
+   * clip's code is reloaded there, because two buffers cannot hold an arbitrarily deep history. The
+   * cut waits for that buffer to render (`renderFrame`), or Back would flash black on the way.
    */
   const back = (): void => {
     const before = state
-    state = reduce(state, { kind: 'back' }, clock)
-    if (state === before) {
+    const after = reduce(state, { kind: 'back' }, clock)
+    if (after === before || !loadSlot(after.current)) {
+      notify()
       return
     }
 
-    const at = now()
-    publishLoad(state.current)
-    publish({ at, kind: 'switch', to: state.current.slot, transition: CUT })
+    state = after
+    backCut = state.current.slot
 
     if (run) {
       if (run.beyond > 0 || run.index > 0) {
@@ -558,10 +549,9 @@ export const createControl = (
           run.index -= 1
         }
         run.queued = run.index
-        run.startedAt = at
+        run.startedAt = now()
         run.armedAt = undefined
-        run.pendingSlot = undefined
-        run.pendingBeyond = false
+        run.pending = 'none'
       } else {
         // Back went before the track's first item; what is on screen is no longer a track step.
         run = undefined
@@ -571,24 +561,22 @@ export const createControl = (
   }
 
   const blackout = (): void => {
-    state = reduce(state, { kind: 'blackout' }, clock)
-    publishPanic()
+    dispatch({ kind: 'blackout' })
     notify()
   }
 
   const freeze = (): void => {
-    state = reduce(state, { kind: 'freeze' }, clock)
-    publishPanic()
+    dispatch({ kind: 'freeze' })
     notify()
   }
 
   /**
    * Stages the step after the one on screen: applies its transition and queues its clip, both
-   * through `reduce`, so a running fade refuses both exactly as it refuses a manual `queue` and a
-   * manual transition change. A refusal here is not an error and is not surfaced — it is retried
-   * on the next `tick`, which is the whole difference between the panel's own controls (a person
-   * pressed them, so a refusal must be visible) and the track's internal book-keeping (nobody
-   * pressed anything, and the step lands a frame later).
+   * through `reduce`, so a running fade refuses both exactly as it refuses a manual change. A refusal
+   * here is not an error and is not surfaced — it is retried on the next `tick`, which is the whole
+   * difference between the performer's own controls (a person pressed them, so a refusal must be
+   * visible) and the track's internal book-keeping (nobody pressed anything, and the step lands a
+   * frame later).
    */
   const stageNextStep = (): void => {
     if (run === undefined || run.queued !== run.index) {
@@ -602,38 +590,18 @@ export const createControl = (
       return
     }
 
-    state = reduce(state, { kind: 'set-transition', transition: step.transition }, clock)
-    const before = state
-    state = reduce(state, { clipId: step.clipId, kind: 'select-next' }, clock)
-
-    const staged = state.next
-    if (staged === undefined || staged.clipId !== step.clipId) {
-      return
+    dispatch({ kind: 'set-transition', transition: step.transition })
+    dispatch({ clipId: step.clipId, kind: 'select-next' })
+    if (state.next?.clipId === step.clipId) {
+      run.queued = next
+      run.pending = 'step'
     }
-    if (before.next?.clipId !== staged.clipId || before.next.slot !== staged.slot) {
-      publishLoad(staged)
-    }
-
-    // A switch may ALREADY be armed and already published — a manual Go, then a track loaded
-    // before that Go's bar lands. The `set-transition` above is accepted by the reducer in that
-    // window, so without this the panel would say the step's transition while the output window
-    // executes whichever one the earlier `switch` carried. `setTransitionKind` re-publishes for
-    // exactly this reason; so does this. Same `at` and same slot — only the transition changed.
-    if (state.firing) {
-      publish({ at: state.firing.at, kind: 'switch', to: staged.slot, transition: state.transition })
-    }
-
-    run.queued = next
-    run.pendingSlot = staged.slot
   }
 
   /**
-   * Fires Go on the panel's behalf once the step on screen has used up its `bars` (spec §7: "A has
-   * used up its bars (auto-advance)").
-   *
-   * No new timing lives here. `go` arms at `nextBarAt`, so arming one bar before the target puts
-   * the switch on exactly the bar `bars` bars after the step started; `barDurationMs` and
-   * `nextBarAt` are `@vev/engines`'s and are used unchanged.
+   * Fires Go on the track's behalf once the step on screen has used up its `bars` (spec §7: "A has
+   * used up its bars (auto-advance)"). `go` arms at `nextBarAt`, so arming one bar before the target
+   * puts the switch on exactly the bar `bars` bars after the step started.
    *
    * A step whose `bars` is no longer than the transition bringing the NEXT one in would come due
    * while that fade is still running, and `reduce` refuses `go` outright then. That is not
@@ -655,28 +623,25 @@ export const createControl = (
 
     const bar = barDurationMs(clock.bpm, clock.beatsPerBar)
     if (now() >= run.startedAt + bar * step.bars - bar) {
-      go()
+      dispatch({ kind: 'go', now: now() })
     }
   }
 
   const loadTrack = (track: LoadedTrack): void => {
     // Loading a track stages its first step, so it is legal exactly when queueing is — asked of
-    // the reducer's own predicate rather than re-derived here. The panel disables the track
-    // selector on the same `canQueue` and says why, so this refusal is visible rather than silent.
+    // the reducer's own predicate rather than re-derived here. The screen disables the control on
+    // the same `canQueue` and says why, so this refusal is visible rather than silent.
     if (!canQueue(state)) {
       return
     }
 
-    for (const clip of track.clips) {
-      clipsById.set(clip.id, clip)
-    }
+    addClips(track.clips)
     run = {
       armedAt: undefined,
       autoAdvance: true,
       beyond: 0,
       index: -1,
-      pendingBeyond: false,
-      pendingSlot: undefined,
+      pending: 'none',
       queued: -1,
       startedAt: undefined,
       track,
@@ -711,87 +676,78 @@ export const createControl = (
 
     const bpm = bpmFromTaps(taps)
     if (bpm !== undefined) {
-      clock = { ...clock, bpm, downbeatAt: at }
-      publishClock()
+      // In place: the compositor's fade reads this same object.
+      clock.bpm = bpm
+      clock.downbeatAt = at
     }
     notify()
   }
 
+  /**
+   * Draws one frame unless frozen, and reports a staged slot ready once it has rendered. Blackout
+   * still renders, because the picture underneath must be current the instant it is lifted. A throw
+   * here must not take the reducer's next frame with it, so it is recorded, once per message.
+   */
+  const renderFrame = (at: number): void => {
+    if (panicMode(state) === 'freeze') {
+      return
+    }
+
+    try {
+      picture.tick(at)
+    } catch (error) {
+      const fault = `The picture threw: ${error instanceof Error ? error.message : String(error)}`
+      if (fault !== pictureFault) {
+        console.error('vev: the picture threw', error)
+        pictureFault = fault
+      }
+      return
+    }
+
+    framesSinceLoad += 1
+    if (framesSinceLoad >= READY_FRAMES) {
+      if (backCut !== undefined) {
+        picture.switchTo(backCut, CUT, at)
+        backCut = undefined
+      }
+      dispatch({ kind: 'next-ready' })
+    }
+  }
+
   const tick = (): void => {
-    // Always notified, even when `state` itself doesn't change: the bar-phase
-    // readout advances every tick regardless, since it's derived from `now()`.
-    state = reduce(state, { kind: 'tick', now: now() }, clock)
-    noticeLanding()
+    const at = now()
+    dispatch({ kind: 'tick', now: at })
     // Retried every tick rather than only on a landing: both `select-next` and `set-transition`
     // are refused while a fade is running, so the first attempt after a landing can legitimately
     // do nothing.
     stageNextStep()
     autoAdvanceIfDue()
-    notify()
+    renderFrame(at)
+
+    if (state !== notifiedState || at - notifiedAt >= VIEW_INTERVAL_MS) {
+      notify()
+    }
   }
 
-  const handleHello = (): void => {
-    const at = now()
-    publishClock()
-
-    const slots = new Map<Slot, Loaded>()
-    slots.set(state.current.slot, state.current)
-    if (state.next) {
-      slots.set(state.next.slot, state.next)
-    }
-    for (const loaded of slots.values()) {
-      publishLoad(loaded)
-    }
-
-    // Restores exactly what was showing before anything else — see this
-    // message's doc comment in `@vev/shared`'s `output-channel.ts`. Panic travels first: a
-    // projector that reloads while blacked out or frozen must come back in that state, not
-    // showing the picture the performer deliberately covered.
-    publishPanic()
-    publish({ at, kind: 'switch', to: state.current.slot, transition: CUT })
-
-    // The restore-cut above is not the whole story if a transition was
-    // already under way: this window's reducer will still complete it
-    // locally on its own next `tick()`, but nothing publishes that unless
-    // it's done here too — a reloaded output window would otherwise sit on
-    // `current` forever, out of sync with a control that thinks the switch
-    // already happened. Progress is derived from a `switch` message's `at`,
-    // not from accumulated deltas (see `output-channel.ts`'s doc comment),
-    // so re-sending the *original* `at` — not `now` — restores the output
-    // to the right point in the transition by construction: a fade re-sent
-    // with its real `startedAt` resumes exactly where it should be, not at
-    // 0%. The output side supersedes the restore-cut above with whichever
-    // of these arrives, since both carry `startOutput`'s "latest wins"
-    // pending-switch semantics.
-    if (state.firing && state.next) {
-      publish({ at: state.firing.at, kind: 'switch', to: state.next.slot, transition: state.transition })
-    } else if (state.fading) {
-      publish({
-        at: state.fading.startedAt,
-        kind: 'switch',
-        to: state.fading.to,
-        transition: state.transition,
-      })
-    }
+  if (loadSlot(state.current)) {
+    picture.switchTo(state.current.slot, CUT, now())
   }
 
   return {
     addClips,
     back,
     blackout,
+    choose,
     clearTrack,
     freeze,
     getSnapshot: snapshot,
     go,
     goNow,
-    handleHello,
     hold,
     loadTrack,
-    overrideNext,
-    queue,
     setAutoAdvance,
     setTransition,
-    setTransitionKind,
+    stage,
     subscribe: (listener) => {
       listeners.add(listener)
       listener(snapshot())
@@ -801,89 +757,5 @@ export const createControl = (
     },
     tap,
     tick,
-  }
-}
-
-export interface StartControlOptions extends CreateControlOptions {
-  /** Cancels a handle returned by `requestFrame`. Defaults to `cancelAnimationFrame`. */
-  cancelFrame?: (handle: number) => void
-  /** Defaults to a fresh `BroadcastChannel(OUTPUT_CHANNEL)`, closed on teardown. */
-  channel?: BroadcastChannel
-  /** Schedules one frame. Defaults to `requestAnimationFrame`, ignoring its timestamp argument (`tick` uses `now()` instead, matching `startOutput`). */
-  requestFrame?: (run: () => void) => number
-}
-
-export interface StartedControl {
-  control: Control
-  /** Unsubscribes the channel and stops the frame loop. */
-  stop: () => void
-}
-
-/**
- * Wires a framework-free `Control` to the real world: a `BroadcastChannel`
- * for publishing and for answering `hello`, and a frame loop that drives
- * `tick` so the bar-phase readout and fade completion advance on their own.
- *
- * Kept here rather than in `+page.svelte`'s `$effect`, for the same reason
- * `startOutput` lives in `output-client.ts` and not in the output route:
- * `.svelte` is outside the type and lint gate (ADR 0001), and Task 4's own
- * defect (a resize handler that broke rendering) got in exactly where
- * nothing could check it. Every browser dependency here is an injectable,
- * defaulted option, so this function is tested the same way `startOutput` is
- * — no real DOM, no real channel.
- */
-export const startControl = (options: StartControlOptions = {}): StartedControl => {
-  const {
-    cancelFrame = cancelAnimationFrame,
-    channel = new BroadcastChannel(OUTPUT_CHANNEL),
-    requestFrame = (run: () => void) =>
-      requestAnimationFrame(() => {
-        run()
-      }),
-    ...controlOptions
-  } = options
-
-  const control = createControl((message) => {
-    // BroadcastChannel.postMessage takes a single argument — unlike
-    // Window.postMessage, it has no `targetOrigin` parameter to require.
-    // oxlint-disable-next-line unicorn/require-post-message-target-origin
-    channel.postMessage(message)
-  }, controlOptions)
-
-  const onMessage = (event: MessageEvent): void => {
-    try {
-      const result = v.safeParse(outputMessageSchema, event.data)
-      if (result.success && result.output.kind === 'hello') {
-        control.handleHello()
-      }
-    } catch (error) {
-      // A throw here must not kill the channel for the rest of the show.
-      console.error('vev: control channel handler failed', error)
-    }
-  }
-  channel.addEventListener('message', onMessage)
-
-  let stopped = false
-  let frame: number | undefined
-  const loop = (): void => {
-    if (stopped) {
-      return
-    }
-    control.tick()
-    frame = requestFrame(loop)
-  }
-  frame = requestFrame(loop)
-
-  return {
-    control,
-    stop: () => {
-      stopped = true
-      channel.removeEventListener('message', onMessage)
-      channel.close()
-      if (frame !== undefined) {
-        cancelFrame(frame)
-        frame = undefined
-      }
-    },
   }
 }
