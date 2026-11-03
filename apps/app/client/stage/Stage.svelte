@@ -160,16 +160,20 @@
     />
   </div>
 
-  {#if notices.length > 0}
-    <ul class="notices">
-      {#each notices as notice (notice.text)}
-        <li class={notice.tone} role="status">{notice.text}</li>
-      {/each}
-    </ul>
-  {/if}
+  <div class="under-row">
+    {#if notices.length > 0}
+      <ul class="notices">
+        {#each notices as notice (notice.text)}
+          <li class={notice.tone} role="status">{notice.text}</li>
+        {/each}
+      </ul>
+    {/if}
+    {#if view}
+      <InfoOverlays {overlays} {view} />
+    {/if}
+  </div>
 
   {#if view}
-    <InfoOverlays {overlays} {view} />
     {#if cardsShown}
       <CandidateCards {live} {view} />
     {/if}
@@ -255,19 +259,26 @@
     z-index: 30;
   }
 
+  /* Notices and overlays stack here, so neither can sit on top of the other. */
+  .under-row {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+    left: 0.4rem;
+    max-width: min(34rem, calc(100vw - 0.8rem));
+    pointer-events: none;
+    position: fixed;
+    top: var(--row-height, 2rem);
+    z-index: 10;
+  }
+
   .notices {
     display: flex;
     flex-direction: column;
     gap: 0.2rem;
-    left: 0.4rem;
     list-style: none;
     margin: 0;
-    max-width: calc(100vw - 0.8rem);
     padding: 0;
-    pointer-events: none;
-    position: fixed;
-    top: var(--row-height, 2rem);
-    z-index: 25;
   }
 
   .notices li {

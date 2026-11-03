@@ -61,18 +61,12 @@
     display: flex;
     flex-direction: column;
     gap: 0.3rem;
-    left: 0.4rem;
     max-height: 60vh;
-    max-width: min(34rem, 60vw);
-    pointer-events: none;
-    position: fixed;
-    top: var(--row-height, 2rem);
-    z-index: 10;
   }
 
   /* Semi-transparent, so the picture reads through it; the shadow keeps text legible on a white clip. */
   .overlay {
-    background: rgb(4 6 10 / 52%);
+    background: rgb(4 6 10 / 62%);
     border-radius: 0.3rem;
     color: #fff;
     font-size: 0.72rem;
