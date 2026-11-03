@@ -15,7 +15,7 @@ import type { Env } from '../env.ts'
 import worker from '../index.ts'
 import { annotateClip } from './annotate.ts'
 import { enqueueAnnotation, ingestQueue } from './consume.ts'
-import type { AiRunner } from './jev.ts'
+import type { AiRunner, JevImage } from './jev.ts'
 import { askJev, choiceQuestion, noulQuestion, scoreQuestion } from './jev.ts'
 import { TAG_THRESHOLD, TAG_VOCABULARY } from './tags.ts'
 
@@ -110,8 +110,9 @@ type WireQuestion =
   | { criteria: { false: string; true: string }; instructions: string; type: 'noul' }
 
 interface JevRequest {
+  assets?: Record<string, { data_base64: string; format: string; type: string }>
   questions: Record<string, WireQuestion>
-  state: string
+  state: string | { brief: string; stills: string[] }
 }
 
 interface FakeCall {
@@ -126,6 +127,12 @@ interface FakeOptions {
   readonly jevResponse?: unknown
   /** Makes every jev call throw, the way a gateway refusal does. */
   readonly jevThrows?: boolean
+  /** Makes a jev call that carries images hang, the way a stalled beta feature would. */
+  readonly imageCallsHang?: boolean
+  /** Replaces the whole response to a jev call that carries images. */
+  readonly imageResponse?: unknown
+  /** Makes a jev call that carries images throw, the way a rejected or unsupported image does. */
+  readonly imageCallsThrow?: boolean
   /** Replaces ONE answer, by question id — how a malformed or out-of-range answer is injected. */
   readonly override?: { readonly answer: unknown; readonly id: string }
 }
@@ -183,10 +190,21 @@ const createFakeAi = (options: FakeOptions = {}): FakeAi => {
         if (options.jevThrows === true) {
           throw new Error('AiGatewayError: 2021: Insufficient AI Gateway credits')
         }
+        const request = inputs as JevRequest
+        if (request.assets !== undefined) {
+          if (options.imageCallsThrow === true) {
+            throw new Error('jev: image input is unavailable')
+          }
+          if (options.imageCallsHang === true) {
+            return await Promise.withResolvers<never>().promise
+          }
+          if (options.imageResponse !== undefined) {
+            return options.imageResponse
+          }
+        }
         if (options.jevResponse !== undefined) {
           return options.jevResponse
         }
-        const request = inputs as JevRequest
         const answers = Object.fromEntries(
           Object.entries(request.questions).map(([id, question]) => [id, answerFor(id, question)]),
         )
@@ -214,6 +232,10 @@ const firstJevRequest = (ai: FakeAi): JevRequest => {
   }
   return call.inputs as JevRequest
 }
+
+/** The text of the brief jev was given, whether the state was a plain string or named some frames. */
+const briefOf = (request: JevRequest): string =>
+  v.is(v.string(), request.state) ? request.state : request.state.brief
 
 const questionOf = (request: JevRequest, id: string): WireQuestion => {
   const question = request.questions[id]
@@ -291,7 +313,7 @@ describe('annotateClip — what it asks', () => {
 
   it('sends the clip code as the state jev judges', async () => {
     const request = await askedOnce()
-    expect(request.state).toContain(CLIP.code)
+    expect(briefOf(request)).toContain(CLIP.code)
   })
 })
 
@@ -481,6 +503,114 @@ describe('annotateClip — what it refuses', () => {
   })
 })
 
+/** Distinct bytes per frame, so a test can tell which frame reached jev and in what order. */
+const stillBytes = (tail: number): Uint8Array => new Uint8Array([0xff, 0xd8, 0xff, 0xe0, tail, tail, tail])
+const STILLS: readonly JevImage[] = [1, 2, 3].map((tail) => ({ bytes: stillBytes(tail), format: 'jpeg' }))
+
+const decodeBase64 = (encoded: string): number[] =>
+  Array.from(atob(encoded), (char) => char.codePointAt(0) ?? 0)
+
+/** The frames a request carried, in the order its state names them. */
+const framesOf = (request: JevRequest): number[][] => {
+  const { state } = request
+  if (v.is(v.string(), state)) {
+    return []
+  }
+  return state.stills.map((key) => decodeBase64(request.assets?.[key]?.data_base64 ?? ''))
+}
+
+describe('annotateClip — stills', () => {
+  it('shows jev the frames in recording order and still sends the code', async () => {
+    const ai = createFakeAi()
+    const result = await annotateClip(ai, { ...CLIP, stills: STILLS })
+
+    expect(jevCalls(ai)).toHaveLength(1)
+    const request = firstJevRequest(ai)
+    expect(framesOf(request)).toStrictEqual(STILLS.map((still) => [...still.bytes]))
+    expect(briefOf(request)).toContain(CLIP.code)
+    expect(result.ok && result.evidence).toBe('stills')
+  })
+
+  it('stores the same annotation the code-only path stores when the answers are the same', async () => {
+    const withStills = await annotateClip(createFakeAi(), { ...CLIP, stills: STILLS })
+    const codeOnly = await annotateClip(createFakeAi(), CLIP)
+    expect(withStills.ok && withStills.annotation).toStrictEqual(codeOnly.ok && codeOnly.annotation)
+  })
+
+  it('asks every question with frames that it asks without them', async () => {
+    const withStills = createFakeAi()
+    await annotateClip(withStills, { ...CLIP, stills: STILLS })
+    const codeOnly = createFakeAi()
+    await annotateClip(codeOnly, CLIP)
+    expect(Object.keys(firstJevRequest(withStills).questions).toSorted()).toStrictEqual(
+      Object.keys(firstJevRequest(codeOnly).questions).toSorted(),
+    )
+  })
+
+  it('tells jev to judge motion from the code when frames are attached', async () => {
+    const ai = createFakeAi()
+    await annotateClip(ai, { ...CLIP, stills: STILLS })
+    expect(questionOf(firstJevRequest(ai), 'motion').instructions).toContain('source code')
+  })
+
+  it('sends no frames for a clip that has none', async () => {
+    const none = createFakeAi()
+    const empty = createFakeAi()
+    const first = await annotateClip(none, CLIP)
+    const second = await annotateClip(empty, { ...CLIP, stills: [] })
+
+    for (const ai of [none, empty]) {
+      expect(jevCalls(ai)).toHaveLength(1)
+      expect(firstJevRequest(ai).assets).toBeUndefined()
+      expect(v.is(v.string(), firstJevRequest(ai).state)).toBe(true)
+    }
+    expect(first.ok && first.evidence).toBe('code')
+    expect(second.ok && second.evidence).toBe('code')
+  })
+
+  it('retries with the code alone when the call with frames throws', async () => {
+    const ai = createFakeAi({ imageCallsThrow: true })
+    const result = await annotateClip(ai, { ...CLIP, stills: STILLS })
+
+    const calls = jevCalls(ai).map((call) => call.inputs as JevRequest)
+    expect(calls.map((request) => request.assets !== undefined)).toStrictEqual([true, false])
+    expect(result.ok && result.evidence).toBe('code')
+    expect(result.ok && result.annotation.energy).toBe(EXPECTED_ENERGY)
+    expect(result.ok && result.annotation.description).toBe(CANNED_DESCRIPTION)
+  })
+
+  it('retries with the code alone when the call with frames returns something unusable', async () => {
+    const ai = createFakeAi({ imageResponse: { answers: {}, model: 'jev-1.14.0' } })
+    const result = await annotateClip(ai, { ...CLIP, stills: STILLS })
+
+    expect(jevCalls(ai)).toHaveLength(2)
+    expect(result.ok && result.evidence).toBe('code')
+  })
+
+  it('retries with the code alone when the call with frames never answers', async () => {
+    vi.useFakeTimers()
+    try {
+      const ai = createFakeAi({ imageCallsHang: true })
+      const pending = annotateClip(ai, { ...CLIP, stills: STILLS })
+      await vi.advanceTimersByTimeAsync(JEV_TIMEOUT_MS + 1000)
+      const result = await pending
+      expect(jevCalls(ai)).toHaveLength(2)
+      expect(result.ok && result.evidence).toBe('code')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('fails after exactly two calls when frames and code both fail, never a third', async () => {
+    const ai = createFakeAi({ jevThrows: true })
+    const result = await annotateClip(ai, { ...CLIP, stills: STILLS })
+
+    expect(jevCalls(ai)).toHaveLength(2)
+    expect(!result.ok && result.reason).toContain('Insufficient AI Gateway credits')
+    expect(ai.calls.map((call) => call.model)).toStrictEqual([JEV_MODEL, JEV_MODEL])
+  })
+})
+
 interface ClipRow {
   annotation_status: string
   author: string
@@ -499,11 +629,11 @@ interface ClipRow {
 }
 
 /** Every NOT NULL column, so the row is a real one rather than a partial the schema would reject. */
-const insertClip = async (id: string): Promise<void> => {
+const insertClip = async (id: string, stillKeys: readonly string[] | null = null): Promise<void> => {
   await env.DB.prepare(
     `insert into clips (annotation_status, author, code, commercial_ok, default_bars, deps, engine,
-       id, isolated, license, modified, origin, original_code, params, reviewed, slug, title)
-     values ('pending', ?, ?, 0, 8, ?, 'hydra', ?, 0, 'CC BY 4.0', 0, 'imported', ?, '[]', 0, ?, ?)`,
+       id, isolated, license, modified, origin, original_code, params, reviewed, slug, still_keys, title)
+     values ('pending', ?, ?, 0, 8, ?, 'hydra', ?, 0, 'CC BY 4.0', 0, 'imported', ?, '[]', 0, ?, ?, ?)`,
   )
     .bind(
       'Khoparzi',
@@ -518,6 +648,7 @@ const insertClip = async (id: string): Promise<void> => {
       id,
       CLIP.code,
       `hydra/slow-fold-${id}`,
+      stillKeys === null ? null : JSON.stringify(stillKeys),
       CLIP.title,
     )
     .run()
@@ -661,6 +792,88 @@ describe('the ingest queue consumer', () => {
     const result = await runQueue({ clipId: crypto.randomUUID() }, createFakeAi())
     expect(result.explicitAcks).toContain('message-under-test')
     expect(result.retryMessages).toHaveLength(0)
+  })
+})
+
+describe('the ingest queue consumer — stills', () => {
+  const putStill = async (key: string, tail: number): Promise<void> => {
+    await env.MEDIA.put(key, stillBytes(tail))
+  }
+
+  it('annotates from the stored stills, in the order the row lists them', async () => {
+    const id = crypto.randomUUID()
+    const keys = [3, 1, 2].map((tail) => `stills/${id}/${tail}.jpg`)
+    await Promise.all(
+      [3, 1, 2].map(async (tail) => {
+        await putStill(`stills/${id}/${tail}.jpg`, tail)
+      }),
+    )
+    await insertClip(id, keys)
+
+    const ai = createFakeAi()
+    await runQueue({ clipId: id }, ai)
+
+    expect(framesOf(firstJevRequest(ai))).toStrictEqual([3, 1, 2].map((tail) => [...stillBytes(tail)]))
+    const { annotation_status: status } = await readClip(id)
+    expect(status).toBe('ok')
+  })
+
+  it('annotates from the code when the row lists stills that R2 does not hold', async () => {
+    const id = crypto.randomUUID()
+    await insertClip(id, [`stills/${id}/0.jpg`, `stills/${id}/1.jpg`])
+
+    const ai = createFakeAi()
+    await runQueue({ clipId: id }, ai)
+
+    expect(jevCalls(ai)).toHaveLength(1)
+    expect(firstJevRequest(ai).assets).toBeUndefined()
+    const { annotation_status: status } = await readClip(id)
+    expect(status).toBe('ok')
+  })
+
+  it('uses the frames that exist when only some are missing', async () => {
+    const id = crypto.randomUUID()
+    await putStill(`stills/${id}/1.jpg`, 7)
+    await insertClip(id, [`stills/${id}/0.jpg`, `stills/${id}/1.jpg`])
+
+    const ai = createFakeAi()
+    await runQueue({ clipId: id }, ai)
+
+    expect(framesOf(firstJevRequest(ai))).toStrictEqual([[...stillBytes(7)]])
+  })
+
+  it('still annotates the clip from its code when the call with frames fails', async () => {
+    const id = crypto.randomUUID()
+    await putStill(`stills/${id}/0.jpg`, 1)
+    await insertClip(id, [`stills/${id}/0.jpg`])
+
+    const ai = createFakeAi({ imageCallsThrow: true })
+    const result = await runQueue({ clipId: id }, ai)
+
+    expect(result.explicitAcks).toContain('message-under-test')
+    expect(annotatedFields(await readClip(id))).toStrictEqual({
+      density: 'sparse',
+      description: CANNED_DESCRIPTION,
+      energy: EXPECTED_ENERGY,
+      layerHint: 'fg',
+      motion: 'fast',
+      status: 'ok',
+      tags: JSON.stringify(EXPECTED_TAGS),
+    })
+  })
+
+  it('marks the clip failed when both the call with frames and the code-only retry fail', async () => {
+    const id = crypto.randomUUID()
+    await putStill(`stills/${id}/0.jpg`, 1)
+    await insertClip(id, [`stills/${id}/0.jpg`])
+
+    const ai = createFakeAi({ jevThrows: true })
+    const result = await runQueue({ clipId: id }, ai)
+
+    expect(result.explicitAcks).toContain('message-under-test')
+    expect(jevCalls(ai)).toHaveLength(2)
+    const { annotation_status: status } = await readClip(id)
+    expect(status).toBe('failed')
   })
 })
 

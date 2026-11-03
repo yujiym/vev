@@ -13,9 +13,11 @@
  * a description of what makes that statement true and what makes it false. Writing those out is
  * what makes the vocabulary a question rather than a keyword list.
  *
- * Annotation reads a clip's CODE, not its thumbnail — spec §11 records the lesson that still
- * frames lead to wrong judgements about motion — so every statement below is phrased about what
- * the code makes the renderer do.
+ * Annotation reads a clip's CODE first and, when the browser uploaded them, a few rendered frames
+ * beside it (ADR 0010). Spec §11 records the lesson that still frames lead to wrong judgements
+ * about motion. Most statements below are about what the clip looks like, which both can show;
+ * `strobe`, `pulsing`, `rotation` and `scrolling` are about change over time, so the brief tells
+ * jev to judge anything that depends on movement from the code (`buildState`, `annotate.ts`).
  *
  * What is NOT here is as deliberate as what is. `feedback` and `audio-reactive` were in this list
  * and have been removed: `analyzeHydra` (`@vev/ingest`) already derives `deps.usesFeedback` and

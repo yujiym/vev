@@ -3,7 +3,7 @@ import { clipDensitySchema, clipEnergySchema, clipLayerHintSchema, clipMotionSch
 import type { ClipDensity, ClipDeps, ClipEnergy, ClipLayerHint, ClipMotion, EngineKind } from '@vev/shared'
 import * as v from 'valibot'
 
-import type { AiRunner, JevAnswer, JevAnswerSet, JevQuestionSet } from './jev.ts'
+import type { AiRunner, JevAnswer, JevAnswerSet, JevImage, JevQuestionSet } from './jev.ts'
 import { askJev, choiceQuestion, noulQuestion, scoreQuestion } from './jev.ts'
 import { derivedTags, TAG_THRESHOLD, TAG_VOCABULARY } from './tags.ts'
 
@@ -15,6 +15,12 @@ import { derivedTags, TAG_THRESHOLD, TAG_VOCABULARY } from './tags.ts'
  * asked as TYPED questions of `typesafe/jev` (see `jev.ts`) rather than parsed out of a generative
  * model's prose. A prose answer drifts ("kaleid" / "kaleidoscope" / "kaleidoscopic"), and a library
  * filtered on drifting text quietly stops finding things.
+ *
+ * The evidence is the clip's code plus, when the browser uploaded them, a few frames the clip
+ * actually rendered (ADR 0010). Frames answer what the code cannot — how dense, how bright, which
+ * way it leans as a layer, what it looks like — but spec §11 records that a still misjudges
+ * MOTION, so `motion` is asked to be judged from the code even when frames are attached. A call
+ * that fails with frames is retried once with the code alone, because image input is beta.
  *
  * Two fields are outside that shape, each for its own reason:
  *
@@ -30,9 +36,6 @@ import { derivedTags, TAG_THRESHOLD, TAG_VOCABULARY } from './tags.ts'
 /** Verified present in `wrangler ai models` on 2026-09-29, and verified to answer on this account. */
 const DESCRIPTION_MODEL = '@cf/qwen/qwen2.5-coder-32b-instruct'
 
-/** One initial attempt plus one retry. A third would only delay marking a clip `failed`. */
-const JEV_ATTEMPTS = 2
-
 const DESCRIPTION_MAX_TOKENS = 160
 
 /**
@@ -47,8 +50,10 @@ const DESCRIPTION_MAX_TOKENS = 160
  *
  * 30s for jev and 20s for the description model are chosen to be an order of magnitude longer than
  * any inference observed on this account (the `@cf/qwen` probe answered in well under a second)
- * while keeping the worst case — two attempts, each a jev call plus a description call — at about
- * 100 seconds, far inside a queue consumer's delivery budget. Nobody is waiting on this: annotation
+ * while keeping the worst case — two jev attempts and the one description call that follows a
+ * success — at about 80 seconds, plus up to 10 seconds loading stills from R2 in `consume.ts`.
+ * That is far inside a queue consumer's delivery budget, and a with-frames attempt does not add
+ * one: it REPLACES the first code-only attempt. Nobody is waiting on this: annotation
  * is asynchronous by §11.1, so the cost of a generous timeout is latency on a failure path, and the
  * cost of a tight one is a correct answer thrown away.
  */
@@ -59,7 +64,7 @@ const DESCRIPTION_TIMEOUT_MS = 20_000
  * Rejects `work` if it has not settled within `ms`. The timer is always cleared, so a call that
  * answers in time does not keep the isolate alive waiting for a timeout that no longer matters.
  */
-const withTimeout = async <T>(work: Promise<T>, ms: number, what: string): Promise<T> => {
+export const withTimeout = async <T>(work: Promise<T>, ms: number, what: string): Promise<T> => {
   const expiry = Promise.withResolvers<never>()
   const timer = setTimeout(() => {
     expiry.reject(new Error(`annotate: ${what} did not answer within ${ms}ms`))
@@ -132,8 +137,13 @@ export interface AnnotatableClip {
   readonly code: string
   readonly deps: ClipDeps
   readonly engine: EngineKind
+  /** Frames the clip rendered, in recording order. Absent or empty means the clip is judged from its code alone. */
+  readonly stills?: readonly JevImage[]
   readonly title: string
 }
+
+/** Which evidence produced an annotation. Logged, never stored. */
+export type AnnotationEvidence = 'code' | 'stills'
 
 /** Exactly the fields annotation produces — `palette` is absent because a model never answers it. */
 export interface Annotation {
@@ -170,20 +180,32 @@ export type AnnotationResult =
   | {
       readonly annotation: Annotation
       readonly confidence: AnnotationConfidence
+      /** What the successful typed call was shown. */
+      readonly evidence: AnnotationEvidence
+      /** How long that call took, the figure §17 wants before the timeouts are tuned. */
+      readonly jevMs: number
       readonly ok: true
     }
   | { readonly ok: false; readonly reason: string }
 
 /** The clip, as jev sees it. Spec §11: estimate mainly from the code — a still frame misjudges motion. */
-const buildState = (clip: AnnotatableClip): string =>
+const buildState = (clip: AnnotatableClip, withStills: boolean): string =>
   [
     `A ${clip.engine} clip for a live VJ set, titled "${clip.title}".`,
     'Judge it from its source code — what it makes the renderer draw and how that changes over time.',
+    ...(withStills
+      ? [
+          'Frames the clip rendered are attached. Use them for what the clip looks like. They are single moments, so judge movement, and anything that depends on movement, from the code.',
+        ]
+      : []),
     '',
     clip.code,
   ].join('\n')
 
-const buildQuestions = (): JevQuestionSet => ({
+const MOTION_INSTRUCTIONS = 'How fast does this clip move?'
+const MOTION_INSTRUCTIONS_WITH_STILLS = `${MOTION_INSTRUCTIONS} Judge it from the source code. The attached frames are single moments and cannot show movement.`
+
+const buildQuestions = (withStills: boolean): JevQuestionSet => ({
   ...Object.fromEntries(
     TAG_VOCABULARY.map((tag) => [
       tagQuestionId(tag.name),
@@ -196,7 +218,10 @@ const buildQuestions = (): JevQuestionSet => ({
     'Is this clip better used as a background layer, a foreground layer, or either?',
     LAYER_HINT_OPTIONS,
   ),
-  [MOTION_ID]: choiceQuestion('How fast does this clip move?', MOTION_OPTIONS),
+  [MOTION_ID]: choiceQuestion(
+    withStills ? MOTION_INSTRUCTIONS_WITH_STILLS : MOTION_INSTRUCTIONS,
+    MOTION_OPTIONS,
+  ),
 })
 
 /**
@@ -302,8 +327,17 @@ interface TypedAnswers {
   readonly confidence: AnnotationConfidence
 }
 
-const askOnce = async (ai: AiRunner, clip: AnnotatableClip): Promise<TypedAnswers> => {
-  const answers = await withTimeout(askJev(ai, buildState(clip), buildQuestions()), JEV_TIMEOUT_MS, 'jev')
+const askOnce = async (
+  ai: AiRunner,
+  clip: AnnotatableClip,
+  stills: readonly JevImage[],
+): Promise<TypedAnswers> => {
+  const withStills = stills.length > 0
+  const answers = await withTimeout(
+    askJev(ai, buildState(clip, withStills), buildQuestions(withStills), stills),
+    JEV_TIMEOUT_MS,
+    'jev',
+  )
   return {
     annotated: {
       density: v.parse(clipDensitySchema, choiceOf(answers, DENSITY_ID)),
@@ -324,28 +358,44 @@ const askOnce = async (ai: AiRunner, clip: AnnotatableClip): Promise<TypedAnswer
 }
 
 /**
+ * The evidence each attempt is shown, in order. A clip with frames tries them first and then falls
+ * back to its code alone; a clip without frames gets its code twice, which is the plain retry the
+ * module always had. Either way it is two attempts, so frames never lengthen the worst case.
+ */
+const attemptPlan = (clip: AnnotatableClip): readonly (readonly JevImage[])[] => {
+  const stills = clip.stills ?? []
+  return stills.length > 0 ? [stills, []] : [[], []]
+}
+
+/**
  * Annotates one clip.
  *
  * Never throws and never returns half an annotation. A malformed response, an answer outside the
  * range its own question defined, an option jev invented, or the call throwing outright (a gateway
  * refusal counts — `AiGatewayError: 2021: Insufficient AI Gateway credits` is exactly what this
- * account returns today) all take the same path: retry once, then report failure so the caller
- * marks the clip `failed` and leaves its own fields untouched.
+ * account returned before credits were loaded) all take the same path: retry once — with the code
+ * alone if the first attempt was shown frames — then report failure so the caller marks the clip
+ * `failed` and leaves its own fields untouched.
  */
 export const annotateClip = async (ai: AiRunner, clip: AnnotatableClip): Promise<AnnotationResult> => {
   let reason = 'annotate: no attempt was made'
+  const plan = attemptPlan(clip)
 
-  for (let attempt = 1; attempt <= JEV_ATTEMPTS; attempt += 1) {
+  for (const [index, stills] of plan.entries()) {
+    const attempt = index + 1
+    const evidence: AnnotationEvidence = stills.length > 0 ? 'stills' : 'code'
     try {
+      const startedAt = Date.now()
       // Sequential by design: attempt 2 exists only because attempt 1 failed.
       // oxlint-disable-next-line eslint/no-await-in-loop -- a retry must not start before the attempt it retries has failed
-      const { annotated, confidence } = await askOnce(ai, clip)
+      const { annotated, confidence } = await askOnce(ai, clip, stills)
+      const jevMs = Date.now() - startedAt
       // oxlint-disable-next-line eslint/no-await-in-loop -- same loop; the description is best-effort and only runs once the typed answers are in
       const description = await describeClip(ai, clip)
-      return { annotation: { ...annotated, description }, confidence, ok: true }
+      return { annotation: { ...annotated, description }, confidence, evidence, jevMs, ok: true }
     } catch (error) {
       reason = error instanceof Error ? error.message : String(error)
-      console.error(`annotate: attempt ${attempt} of ${JEV_ATTEMPTS} failed`, error)
+      console.error(`annotate: attempt ${attempt} of ${plan.length} (${evidence}) failed`, error)
     }
   }
 
