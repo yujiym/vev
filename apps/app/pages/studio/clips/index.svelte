@@ -1,12 +1,14 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
 <script lang="ts">
-  import type { LibraryFilters, LicenceFilter } from '$lib/library.ts'
-  import { clipFlags, collectTags, fetchLibrary, thumbnailUrl } from '$lib/library.ts'
   import type { ClipEnergy, ClipSummary, EngineKind } from '@vev/shared'
+  import { Link } from '@void/svelte'
+
+  import type { LibraryFilters, LicenceFilter } from '../../../client/library.ts'
+  import { clipFlags, collectTags, fetchLibrary, thumbnailUrl } from '../../../client/library.ts'
 
   /**
    * The library grid. Every decision it renders — which filters reach the server, which are
-   * applied here, what a clip's state looks like — lives in `$lib/library.ts`, where the type and
+   * applied here, what a clip's state looks like — lives in `client/library.ts`, where the type and
    * lint gate can see it (ADR 0001). This file is props in, markup out.
    */
 
@@ -63,8 +65,8 @@
 <main>
   <h1>Library</h1>
   <p>
-    <a href="/studio/clips/new">Register a clip</a> · <a href="/studio/tracks">Tracks</a> ·
-    <a href="/studio">Control panel</a>
+    <Link href="/studio/clips/new">Register a clip</Link> · <Link href="/studio/tracks">Tracks</Link> ·
+    <Link href="/studio">Control panel</Link>
   </p>
 
   <section aria-label="Filters">

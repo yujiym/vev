@@ -2,6 +2,7 @@
 <script lang="ts">
   import { healthResponseSchema } from '@vev/shared'
   import type { HealthResponse } from '@vev/shared'
+  import { Link } from '@void/svelte'
   import * as v from 'valibot'
 
   let health = $state<HealthResponse | undefined>()
@@ -22,7 +23,7 @@
 
 <button onclick={check} type="button">Check API</button>
 
-<p><a href="/studio">Open the studio (debug control panel)</a></p>
+<p><Link href="/studio">Open the studio (debug control panel)</Link></p>
 
 {#if health}
   <p>mode: {health.mode} · settings rows: {health.settingsRows} · commit: {health.commit}</p>

@@ -1,7 +1,9 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
 <script lang="ts">
-  import { page } from '$app/state'
-  import { fetchLibrary } from '$lib/library.ts'
+  import type { ClipSummary, Track, TrackItem } from '@vev/shared'
+  import { Link, useParams } from '@void/svelte'
+
+  import { fetchLibrary } from '../../../client/library.ts'
   import {
     appendItem,
     fetchTrack,
@@ -10,14 +12,15 @@
     replaceItem,
     setSection,
     updateTrack,
-  } from '$lib/track-editor.ts'
-  import type { ClipSummary, Track, TrackItem } from '@vev/shared'
+  } from '../../../client/track-editor.ts'
 
   /**
    * The track editor: an ordered list with up/down buttons and a section label per item. Every
-   * list transform is `$lib/track-editor.ts`'s and tested there — including the one that decides
+   * list transform is `client/track-editor.ts`'s and tested there — including the one that decides
    * what "up" does to the first item (a no-op, never a wrap). ADR 0001: this file stays markup.
    */
+
+  const params = useParams<{ id: string }>()
 
   let track = $state<Track | undefined>()
   let items = $state<readonly TrackItem[]>([])
@@ -49,7 +52,7 @@
   }
 
   $effect(() => {
-    const { id } = page.params
+    const { id } = params
     if (id !== undefined) {
       void load(id)
     }
@@ -99,8 +102,8 @@
 
 <main>
   <p>
-    <a href="/studio/tracks">Tracks</a> · <a href="/studio/clips">Library</a> ·
-    <a href="/studio">Control panel</a>
+    <Link href="/studio/tracks">Tracks</Link> · <Link href="/studio/clips">Library</Link> ·
+    <Link href="/studio">Control panel</Link>
   </p>
 
   {#if loading}

@@ -1,6 +1,6 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
 <script lang="ts">
-  import { startOutput } from '$lib/output-client.ts'
+  import { startOutput } from '../client/output-client.ts'
 
   let canvas: HTMLCanvasElement | undefined = $state()
   let startupError = $state<string | undefined>()

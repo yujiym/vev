@@ -1,10 +1,13 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
 <script lang="ts">
-  import { goto } from '$app/navigation'
-  import { createTrack, fetchTracks } from '$lib/track-editor.ts'
   import type { Track } from '@vev/shared'
+  import { Link, useRouter } from '@void/svelte'
 
-  /** The saved tracks, and the one form that makes another. All logic is in `$lib/track-editor.ts` (ADR 0001). */
+  import { createTrack, fetchTracks } from '../../../client/track-editor.ts'
+
+  /** The saved tracks, and the one form that makes another. All logic is in `client/track-editor.ts` (ADR 0001). */
+
+  const router = useRouter()
 
   let tracks = $state<readonly Track[]>([])
   let loading = $state(true)
@@ -45,7 +48,7 @@
         title,
         visibility,
       })
-      await goto(`/studio/tracks/${track.id}`)
+      await router.visit(`/studio/tracks/${track.id}`)
     } catch (error) {
       createError = error instanceof Error ? error.message : 'unknown error'
     } finally {
@@ -56,7 +59,7 @@
 
 <main>
   <h1>Tracks</h1>
-  <p><a href="/studio/clips">Library</a> · <a href="/studio">Control panel</a></p>
+  <p><Link href="/studio/clips">Library</Link> · <Link href="/studio">Control panel</Link></p>
 
   {#if loading}
     <p role="status">Loading…</p>
@@ -68,7 +71,7 @@
     <ul>
       {#each tracks as track (track.id)}
         <li>
-          <a href="/studio/tracks/{track.id}">{track.title}</a>
+          <Link href="/studio/tracks/{track.id}">{track.title}</Link>
           <span class="meta">
             {track.items.length}
             {track.items.length === 1 ? 'clip' : 'clips'} · {track.mode} · {track.visibility}

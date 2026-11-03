@@ -1,17 +1,18 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
 <script lang="ts">
-  import type { Control, PlayableClip } from '$lib/control.ts'
-  import { controlHints, startControl } from '$lib/control.ts'
-  import { fetchClip, fetchLibrary } from '$lib/library.ts'
-  import type { Live, LiveView } from '$lib/live.ts'
-  import { createLive, nextTransitionChoice, transitionLabel } from '$lib/live.ts'
-  import { fetchTrack, fetchTrackClips, fetchTracks, resolveTrack } from '$lib/track-editor.ts'
   import { FIXTURES } from '@vev/engines'
   import type { Track } from '@vev/shared'
 
+  import type { Control, PlayableClip } from '../../client/control.ts'
+  import { controlHints, startControl } from '../../client/control.ts'
+  import { fetchClip, fetchLibrary } from '../../client/library.ts'
+  import type { Live, LiveView } from '../../client/live.ts'
+  import { createLive, nextTransitionChoice, transitionLabel } from '../../client/live.ts'
+  import { fetchTrack, fetchTrackClips, fetchTracks, resolveTrack } from '../../client/track-editor.ts'
+
   /**
    * The control screen of spec §12.1. Every decision it renders — candidates, Next, the transition,
-   * the direction, the key map — lives in `$lib/live.ts`, `$lib/control.ts` and `@vev/decision`.
+   * the direction, the key map — lives in `client/live.ts`, `client/control.ts` and `@vev/decision`.
    * This file is props in, markup out, because templates are outside the type and lint gate
    * (ADR 0001).
    */

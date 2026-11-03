@@ -1,6 +1,9 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
 <script lang="ts">
-  import type { ClipFormInput } from '$lib/register-clip.ts'
+  import type { ProbeResult } from '@vev/engines/hydra'
+  import type { EngineKind, NewClipOrigin } from '@vev/shared'
+
+  import type { ClipFormInput } from '../../../client/register-clip.ts'
   import {
     applyPrefill,
     buildNewClip,
@@ -10,9 +13,7 @@
     submitClip,
     submitStills,
     submitThumbnail,
-  } from '$lib/register-clip.ts'
-  import type { ProbeResult } from '@vev/engines/hydra'
-  import type { EngineKind, NewClipOrigin } from '@vev/shared'
+  } from '../../../client/register-clip.ts'
 
   /**
    * This page mounts its own `HydraCompositor` (see `register-clip.ts`'s `runProbe` and

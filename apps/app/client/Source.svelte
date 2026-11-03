@@ -1,11 +1,10 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
 <script lang="ts">
-  import { env } from '$env/dynamic/public'
-
   import { resolveSourceLink } from './source.ts'
 
-  const commit = env.PUBLIC_GIT_COMMIT ?? 'dev'
-  const link = resolveSourceLink(env.PUBLIC_SOURCE_URL, commit)
+  const { commit, sourceUrl }: { commit: string; sourceUrl: string } = $props()
+
+  const link = $derived(resolveSourceLink(sourceUrl, commit))
 </script>
 
 <footer>
@@ -14,7 +13,7 @@
       Source ({commit})
     </a>
   {:else}
-    <span>Source link not configured — set PUBLIC_SOURCE_URL</span>
+    <span>Source link not configured — set SOURCE_URL</span>
   {/if}
   — vev is free software under AGPL-3.0-or-later.
 </footer>

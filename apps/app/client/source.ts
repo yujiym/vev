@@ -15,8 +15,8 @@ export const sourceCommitUrl = (sourceUrl: string, commit: string): string => {
  * would let a self-hoster's modified build silently point every visitor at
  * vev's own source instead of theirs, which is the one AGPL §13 failure that
  * matters (§14.1). It renders as a visible "not configured" state instead. A
- * documented default lives in the tracked `apps/web/.env`, not as a fallback
- * here.
+ * documented default is the `SOURCE_URL` var in `apps/app/deploy-targets.ts`, not
+ * a fallback here.
  */
 export type SourceLink = { kind: 'link'; href: string } | { kind: 'missing' }
 
