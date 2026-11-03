@@ -299,7 +299,13 @@
       {#if next}
         <p class="clip-title">{next.title ?? next.clipId}</p>
         <p class="clip-meta">
-          {next.source === 'track' ? 'track item' : `candidate ${(next.candidateIndex ?? 0) + 1}`}
+          {#if next.source === 'track'}
+            track item
+          {:else if next.candidateIndex === undefined}
+            already staged
+          {:else}
+            candidate {next.candidateIndex + 1}
+          {/if}
         </p>
         <p class="transition">
           {transitionLabel(next.transition)}
@@ -338,6 +344,9 @@
       {/if}
       {#if hints?.transition}
         <p class="hint" role="status">{hints.transition}</p>
+      {/if}
+      {#if hints?.queue}
+        <p class="hint" role="status">{hints.queue}</p>
       {/if}
       {#if view?.live.error}
         <p class="hint error" role="status">Candidates stale — {view.live.error}</p>
@@ -407,6 +416,7 @@
           class="candidate"
           class:selected={view?.live.pickedClipId === candidate.clipId}
           class:leading={next?.source === 'candidate' && next.candidateIndex === index}
+          disabled={!view?.control.canQueue}
           onclick={() => live?.pickCandidate(candidate.clipId)}
           type="button"
         >

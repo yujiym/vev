@@ -182,10 +182,12 @@ export const chooseTransitionManually = (state: LiveState, transition: Transitio
 export interface LiveNext {
   candidateIndex?: number
   clipId: string
-  source: 'candidate' | 'track'
+  /** `staged` is a clip the control window holds that no current candidate or track step names. */
+  source: 'candidate' | 'staged' | 'track'
   title?: string
   transition: TransitionSpec
-  transitionFrom: 'locked' | 'performer' | 'rules' | 'suggested' | 'track'
+  /** `staged` is the transition already set on the control window, which a late answer may not change once Go is armed. */
+  transitionFrom: 'locked' | 'performer' | 'rules' | 'staged' | 'suggested' | 'track'
 }
 
 export interface TrackNext {
@@ -309,6 +311,9 @@ export const selectNext = (state: LiveState, input: NextInput): LiveNext | undef
 
   return selected.source === 'track' ? selected : automaticTransition(state, input, selected)
 }
+
+const sameTransition = (a: TransitionSpec, b: TransitionSpec): boolean =>
+  a.kind === b.kind && a.bars === b.bars
 
 /** The one-click change: cut → 1-bar fade → 2-bar fade → 4-bar fade → cut. */
 export const nextTransitionChoice = (transition: TransitionSpec): TransitionSpec => {
@@ -689,10 +694,8 @@ export const createLive = (options: CreateLiveOptions): Live => {
     try {
       const { transition } = desired
       const sameClip = current.next?.clipId === desired.clipId
-      const sameTransition =
-        current.transition.kind === transition.kind && current.transition.bars === transition.bars
 
-      if (!sameTransition) {
+      if (!sameTransition(current.transition, transition)) {
         control.setTransition(transition)
       }
       if (!sameClip) {
@@ -701,6 +704,36 @@ export const createLive = (options: CreateLiveOptions): Live => {
     } finally {
       syncing = false
     }
+  }
+
+  /**
+   * What will play, as the control window holds it. The screen's own idea of Next
+   * (`desiredNext`) is only what it wants staged: once a switch is armed, or while a fade is
+   * running, the control window refuses the change, and showing the wish would name a clip that is
+   * not the one about to go live.
+   */
+  const stagedNext = (): LiveNext | undefined => {
+    const staged = controlSnapshot.next
+    if (staged === undefined) {
+      return undefined
+    }
+
+    const { transition } = controlSnapshot
+    const desired = desiredNext()
+    if (desired?.clipId === staged.clipId) {
+      return sameTransition(desired.transition, transition)
+        ? desired
+        : { ...desired, transition, transitionFrom: 'staged' }
+    }
+
+    const base = { clipId: staged.clipId, title: lookup(staged.clipId)?.title, transition }
+    if (trackNextFor()?.clipId === staged.clipId) {
+      return { ...base, source: 'track', transitionFrom: 'staged' }
+    }
+    const candidateIndex = live.candidates.findIndex((candidate) => candidate.clipId === staged.clipId)
+    return candidateIndex === -1
+      ? { ...base, source: 'staged', transitionFrom: 'staged' }
+      : { ...base, candidateIndex, source: 'candidate', transitionFrom: 'staged' }
   }
 
   const snapshot = (): LiveView => ({
@@ -713,7 +746,7 @@ export const createLive = (options: CreateLiveOptions): Live => {
       error: live.error,
       historyIds: live.historyIds,
       load: live.load,
-      next: desiredNext(),
+      next: stagedNext(),
       pickedClipId: live.pickedClipId,
       recentTransitions: live.recentTransitions,
       suggestedTransition: live.suggestedTransition,
@@ -810,6 +843,9 @@ export const createLive = (options: CreateLiveOptions): Live => {
 
   return {
     chooseTransition: (transition) => {
+      if (!controlSnapshot.canSetTransition) {
+        return
+      }
       live = chooseTransitionManually(live, transition)
       syncNext({ performer: true })
       notify()
@@ -872,6 +908,9 @@ export const createLive = (options: CreateLiveOptions): Live => {
           if (candidate === undefined) {
             return false
           }
+          if (!controlSnapshot.canQueue) {
+            return true
+          }
           live = pickCandidate(live, candidate.clipId)
           syncNext({ performer: true })
           notify()
@@ -883,7 +922,7 @@ export const createLive = (options: CreateLiveOptions): Live => {
       }
     },
     pickCandidate: (clipId) => {
-      if (!live.candidates.some((candidate) => candidate.clipId === clipId)) {
+      if (!controlSnapshot.canQueue || !live.candidates.some((candidate) => candidate.clipId === clipId)) {
         return
       }
       live = pickCandidate(live, clipId)

@@ -618,6 +618,49 @@ describe('createLive with a track and an armed switch', () => {
     expect(live.getSnapshot().live.next).toMatchObject({ clipId: 'feedback', transition: CUT })
   })
 
+  it('names the clip that is armed as Next when a late answer prefers another', async () => {
+    let call = 0
+    const { advance, control, live } = setup((body) => {
+      call += 1
+      return body.currentClipId === 'a' && call > 1 ? response(['z', 'y']) : response(['x', 'y'])
+    })
+    await vi.waitFor(() => {
+      expect(control.getSnapshot().next?.clipId).toBe('x')
+    })
+    advance(10)
+    control.go()
+
+    live.interpret('different')
+    await vi.waitFor(() => {
+      expect(live.getSnapshot().live.candidates[0]?.clipId).toBe('z')
+    })
+
+    expect(control.getSnapshot().next?.clipId).toBe('x')
+    expect(live.getSnapshot().live.next).toMatchObject({ clipId: 'x', title: 'X' })
+    expect(live.getSnapshot().live.next?.transition).toStrictEqual(control.getSnapshot().transition)
+  })
+
+  it('refuses a candidate click and a transition change during a fade, and Next still names what will play', async () => {
+    const { advance, control, live } = setup(() => response(['x', 'y', 'z']))
+    await vi.waitFor(() => {
+      expect(live.getSnapshot().live.load).toBe('ok')
+    })
+    live.pickCandidate('x')
+    live.chooseTransition(FADE)
+    advance(500)
+    control.go()
+    advance(2000)
+    expect(control.getSnapshot().fading).toBe(true)
+
+    live.pickCandidate('y')
+    live.chooseTransition(CUT)
+    expect(live.key({ key: '3' }, { chatFocused: false })).toBe(true)
+
+    expect(control.getSnapshot()).toMatchObject({ next: { clipId: 'x' }, transition: FADE })
+    expect(live.getSnapshot().live.next).toMatchObject({ clipId: 'x', transition: FADE })
+    expect(live.getSnapshot().live.pickedClipId).toBe('x')
+  })
+
   it('does not offer a candidate whose code could not be fetched', async () => {
     const control = createControl(() => {}, {
       clips: ids.map((id) => playable(id)),
