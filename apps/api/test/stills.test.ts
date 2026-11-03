@@ -19,8 +19,7 @@ const registerClip = async (): Promise<string> => {
     headers: { 'content-type': 'application/json', ...ACCESS_HEADERS },
     method: 'POST',
   })
-  // SAFETY: the route this suite just called returns the stored clip, which always has an id.
-  const { id } = (await response.json()) as { id: string }
+  const { id } = v.parse(v.object({ id: v.string() }), await response.json())
   return id
 }
 
