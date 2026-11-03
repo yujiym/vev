@@ -1137,6 +1137,74 @@ describe('transport controls', () => {
     expect(control.getSnapshot().track).toMatchObject({ index: 0, queued: 0 })
   })
 
+  it('Back from a candidate played after the track ended returns to the last item and keeps the cursor on it', () => {
+    const clockNow = createFakeNow(0)
+    const { control } = trackControl(clockNow)
+    control.addClips([{ code: 'osc(9).out()', id: 'extra', title: 'Extra' }])
+    control.loadTrack(cutTrack(4))
+    for (const [pressed, landed] of [
+      [500, 2000],
+      [2500, 4000],
+      [4500, 6000],
+    ] as const) {
+      clockNow.set(pressed)
+      control.go()
+      clockNow.set(landed)
+      control.tick()
+    }
+    expect(control.getSnapshot()).toMatchObject({ current: { clipId: 'three' }, track: { index: 2 } })
+
+    control.overrideNext('extra')
+    clockNow.set(6500)
+    control.go()
+    clockNow.set(8000)
+    control.tick()
+    expect(control.getSnapshot().current.clipId).toBe('extra')
+
+    clockNow.set(8500)
+    control.back()
+    clockNow.set(8600)
+    control.tick()
+
+    expect(control.getSnapshot()).toMatchObject({
+      current: { clipId: 'three' },
+      next: undefined,
+      track: { index: 2, queued: 2 },
+    })
+  })
+
+  it('Back through several candidates played after the track ended returns to the last item one at a time', () => {
+    const clockNow = createFakeNow(0)
+    const { control } = trackControl(clockNow)
+    control.addClips([
+      { code: 'osc(8).out()', id: 'extra-1', title: 'Extra 1' },
+      { code: 'osc(9).out()', id: 'extra-2', title: 'Extra 2' },
+    ])
+    control.loadTrack(track([{ bars: 4, clipId: 'one', transition: CUT_SPEC }]))
+    clockNow.set(500)
+    control.go()
+    clockNow.set(2000)
+    control.tick()
+    for (const [clipId, pressed, landed] of [
+      ['extra-1', 2500, 4000],
+      ['extra-2', 4500, 6000],
+    ] as const) {
+      control.overrideNext(clipId)
+      clockNow.set(pressed)
+      control.go()
+      clockNow.set(landed)
+      control.tick()
+    }
+    expect(control.getSnapshot().current.clipId).toBe('extra-2')
+
+    control.back()
+    expect(control.getSnapshot()).toMatchObject({ current: { clipId: 'extra-1' }, track: { index: 0 } })
+    control.back()
+    expect(control.getSnapshot()).toMatchObject({ current: { clipId: 'one' }, track: { index: 0 } })
+    control.back()
+    expect(control.getSnapshot()).toMatchObject({ current: { clipId: 'start' }, track: undefined })
+  })
+
   it('overriding Next mid-track makes the override the next item and carries on after it', () => {
     const clockNow = createFakeNow(0)
     const { control } = trackControl(clockNow)

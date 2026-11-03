@@ -248,10 +248,18 @@ interface TrackRun {
   /** The `at` of the switch currently armed, kept so `startedAt` is the bar the step LANDED on, not the tick that noticed. */
   armedAt: number | undefined
   autoAdvance: boolean
+  /**
+   * How many clips have played after the track's last item (the performer's picks once the track
+   * ran out). `index` stays on that last item, so this is what lets Back walk out of them one at a
+   * time instead of mistaking the first Back for a step back through the track.
+   */
+  beyond: number
   /** The step on screen, or -1 before the first one has landed. */
   index: number
   /** The slot the staged step was loaded into: how a landing is detected, since two steps may name the same clip. */
   pendingSlot: Slot | undefined
+  /** The staged clip is a pick made after the last item, so landing it moves `beyond` and not `index`. */
+  pendingBeyond: boolean
   /** The step staged as `next`; equal to `index` when nothing is staged. */
   queued: number
   startedAt: number | undefined
@@ -337,10 +345,15 @@ export const createControl = (
       return
     }
 
-    run.index = run.queued
+    if (run.pendingBeyond) {
+      run.beyond += 1
+    } else {
+      run.index = run.queued
+    }
     run.startedAt = run.armedAt ?? now()
     run.armedAt = undefined
     run.pendingSlot = undefined
+    run.pendingBeyond = false
   }
 
   const notify = (): void => {
@@ -435,6 +448,10 @@ export const createControl = (
     if (run && run.track.steps[run.index + 1] !== undefined) {
       run.queued = run.index + 1
       run.pendingSlot = staged?.slot
+      run.pendingBeyond = false
+    } else if (run) {
+      run.pendingSlot = staged?.slot
+      run.pendingBeyond = true
     }
     notify()
   }
@@ -531,12 +548,17 @@ export const createControl = (
     publish({ at, kind: 'switch', to: state.current.slot, transition: CUT })
 
     if (run) {
-      if (run.index > 0) {
-        run.index -= 1
+      if (run.beyond > 0 || run.index > 0) {
+        if (run.beyond > 0) {
+          run.beyond -= 1
+        } else {
+          run.index -= 1
+        }
         run.queued = run.index
         run.startedAt = at
         run.armedAt = undefined
         run.pendingSlot = undefined
+        run.pendingBeyond = false
       } else {
         // Back went before the track's first item; what is on screen is no longer a track step.
         run = undefined
@@ -648,7 +670,9 @@ export const createControl = (
     run = {
       armedAt: undefined,
       autoAdvance: true,
+      beyond: 0,
       index: -1,
+      pendingBeyond: false,
       pendingSlot: undefined,
       queued: -1,
       startedAt: undefined,
