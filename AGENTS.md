@@ -30,9 +30,9 @@ Vite+ (`vp`) drives tests, lint (oxlint) and format (oxfmt) from the root `vite.
 
 ## Repository status
 
-M0 through M2 (§18) are built: `apps/api` (Void Worker around a Hono app; owns the D1/assets bindings and serves `apps/web`'s build as static assets), `apps/web` (SvelteKit SPA, `adapter-static`), and `packages/shared` (Valibot API schemas) all exist and are populated.
+The MVP cut is built on localhost: M0 through M2 (§18), the rule half of M3 and M4, M6's automatic transitions mapped onto `cut` and `crossfade`, M7's dictionary steering, and §12.1's control screen. `apps/api` is a Void Worker around a Hono app and serves `apps/web`'s `adapter-static` build as static assets. `packages/shared`, `packages/engines`, `packages/ingest` and `packages/decision` exist.
 
-The rest of §4.1's layout is still a target, not a scaffold to assume: `packages/engines`, `packages/ingest`, `packages/decision`, and `services/decision-server` do not exist yet.
+Not built: embeddings and Vectorize, the settings screen and `systemone-http` providers (M5), textmode.js and ISF (M8, M9), public URLs (M10), audio input, session logging and offline preparation (M11), and self-hosting setup (M12). `services/decision-server` does not exist. §17 says what each leaves open.
 
 ## Language
 
