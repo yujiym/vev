@@ -6,7 +6,7 @@ How to run vev locally and what bites. The design lives in [spec.md](./spec.md);
 
 ## Void
 
-`apps/api` runs on Void ([ADR 0009](./adr/0009-void-for-the-worker.md)). Worker bindings and the deploy targets live in `apps/api/void.config.ts`, selected by `VEV_TARGET` (`local` by default). Local D1, R2 and queue state live in `apps/api/.void/`. Use `void db migrate` for migrations and `void db execute <sql>` for local SQL, from `apps/api`.
+`apps/api` runs on Void ([ADR 0009](./adr/0009-void-for-the-worker.md)). Worker bindings and the deploy targets live in `apps/api/deploy-targets.ts` (a module of their own so a test can read them), which `apps/api/void.config.ts` selects from by `VEV_TARGET` (`local` by default). Local D1, R2 and queue state live in `apps/api/.void/`. Use `void db migrate` for migrations and `void db execute <sql>` for local SQL, from `apps/api`.
 
 ## Commands
 
@@ -25,6 +25,7 @@ How to run vev locally and what bites. The design lives in [spec.md](./spec.md);
 
 Entries that name `wrangler` record what established them. Current commands are in the table above.
 
+- **Void defaults `workers_dev` and `preview_urls` to true, so every cloud target sets both to false.** Access protects only the custom domain, and the Worker's own guard checks only that an assertion header is present. `apps/api/test/deploy-targets.test.ts` fails if `preview` or `production` leaves either on. To see what Void actually emits for a target, run `VEV_TARGET=production pnpm exec vp build` in `apps/api` and read `dist/ssr/wrangler.json` (the keys are absent for `local`); rebuild with the default target afterwards, since `pnpm live` builds it anyway.
 - **Keep `routing.notFound` at `none` in `void.config.ts`.** Void asks the assets again for a route's 404. An asset-layer SPA fallback turns an unknown `/api` path into `200 index.html`, so the fallback lives in `middleware/01.server.ts`. The smoke check fails if this regresses.
 - **After a change to the `miniflare` / `workerd` overrides in `pnpm-workspace.yaml`, reinstall from scratch.** A stale symlink survives in an already-installed `node_modules`; neither `pnpm install` nor `pnpm install --force` clears it. `rm -rf node_modules && pnpm install` does. A fresh clone and CI are unaffected — the lockfile is correct.
 - **Name the next migration**: `drizzle-kit generate --name <name>`. Without it drizzle-kit invents a name and the file has to be renamed and its entry in `migrations/meta/_journal.json` corrected by hand.
