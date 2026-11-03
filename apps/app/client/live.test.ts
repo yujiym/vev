@@ -649,6 +649,49 @@ describe('createLive with a track and an armed switch', () => {
     expect(live.getSnapshot().live.pickedClipId).toBeUndefined()
   })
 
+  it('a track step that will not compile is compiled once across sixty frames, not on every notification', async () => {
+    const errors = vi.spyOn(console, 'error').mockReturnValue()
+    let clock = 0
+    let attempts = 0
+    const control = createControl(
+      {
+        ...QUIET_PICTURE,
+        load: (_slot, code) => {
+          if (code === 'broken()') {
+            attempts += 1
+            throw new SyntaxError('nope')
+          }
+        },
+      },
+      {
+        clips: [playable('a'), { code: 'broken()', id: 'bad', title: 'Bad' }],
+        now: () => clock,
+        startClipId: 'a',
+      },
+    )
+    const live = createLive({
+      control,
+      fetchCandidates: async () => await delayed(response(['x'])),
+      fetchClipById: async (id) => await delayed(clip(id)),
+      fetchLibrarySummaries: async () => await delayed([]),
+    })
+    await vi.waitFor(() => {
+      expect(live.getSnapshot().live.load).toBe('ok')
+    })
+
+    control.loadTrack({ clips: [], id: 'track-1', steps: [cutStep('bad')], title: 'Set' })
+    live.setTrack(trackOf(['bad']))
+    for (let frame = 1; frame <= 60; frame += 1) {
+      clock = frame * 17
+      control.tick()
+    }
+
+    expect(attempts).toBe(1)
+    expect(control.getSnapshot()).toMatchObject({ current: { clipId: 'a' }, next: undefined })
+    expect(control.getSnapshot().pictureFault).toContain('Bad did not load')
+    errors.mockRestore()
+  })
+
   it('falls back to candidate #1 once the track has no next item, without moving the track cursor', async () => {
     const { advance, control, live } = setup(() => response(['x', 'y', 'z']))
     await vi.waitFor(() => {

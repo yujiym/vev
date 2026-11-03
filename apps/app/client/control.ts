@@ -309,6 +309,8 @@ export const createControl = (picture: Picture, options: CreateControlOptions = 
   const clipsById = new Map<string, PlayableClip>((options.clips ?? FIXTURES).map((clip) => [clip.id, clip]))
 
   let run: TrackRun | undefined
+  /** Code the picture refused, with its reason. Keyed by the code itself, since an id can be given other code. */
+  const refusedCode = new Map<string, string>()
   let framesSinceLoad = 0
   let pictureFault: string | undefined
   /** A Back's cut, waiting for the buffer it just reloaded to render. */
@@ -382,10 +384,20 @@ export const createControl = (picture: Picture, options: CreateControlOptions = 
     }
   }
 
-  /** A clip that will not compile costs its own switch and nothing else: the show keeps what it has (§0). */
+  /**
+   * A clip that will not compile costs its own switch and nothing else: the show keeps what it has
+   * (§0). Code that failed once fails again, so it is not compiled again: whatever asks for it, the
+   * screen's own sync included, gets the same refusal without another compile on the show's thread.
+   */
   const loadSlot = (loaded: Loaded): boolean => {
     const clip = clipsById.get(loaded.clipId)
     if (clip === undefined) {
+      return false
+    }
+
+    const known = refusedCode.get(clip.code)
+    if (known !== undefined) {
+      pictureFault = `${clip.title} did not load: ${known}`
       return false
     }
 
@@ -393,7 +405,9 @@ export const createControl = (picture: Picture, options: CreateControlOptions = 
       picture.load(loaded.slot, clip.code)
     } catch (error) {
       console.error(`vev: clip ${loaded.clipId} did not load`, error)
-      pictureFault = `${clip.title} did not load: ${error instanceof Error ? error.message : String(error)}`
+      const reason = error instanceof Error ? error.message : String(error)
+      refusedCode.set(clip.code, reason)
+      pictureFault = `${clip.title} did not load: ${reason}`
       return false
     }
     framesSinceLoad = 0
