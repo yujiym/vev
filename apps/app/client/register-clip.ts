@@ -207,38 +207,38 @@ export const captureThumbnail = async (
 
   const clock: Clock = { beatsPerBar: 4, bpm: 120, downbeatAt: now() }
   const compositor = await createCompositor(clock)
-  compositor.mount(canvas)
-  compositor.load('a', code)
-  compositor.switchTo('a', { bars: 0, kind: 'cut' }, now())
-
-  const midpointMs = midRecordingFraction(ms)
-  const startedAt = now()
-  const moments = stillMoments(ms)
-  const size = stillSize(canvas.width, canvas.height)
-  const snapshots: HTMLCanvasElement[] = []
-  let midFrame: SampledFrame | undefined
   let frame: number | undefined
-  const tick = (): void => {
-    compositor.tick(now())
-    const elapsed = now() - startedAt
-    if (midFrame === undefined && elapsed >= midpointMs) {
-      midFrame = sample(canvas)
-    }
-    if (size !== undefined && moments.length > 0 && elapsed >= (moments[0] ?? Infinity)) {
-      // A moment is spent whether or not the copy works: retrying a failing copy every frame
-      // would only repeat the failure.
-      moments.shift()
-      try {
-        snapshots.push(snapshot(canvas, size))
-      } catch (error) {
-        console.error('captureThumbnail: could not copy a still frame', error)
+  try {
+    compositor.mount(canvas)
+    compositor.load('a', code)
+    compositor.switchTo('a', { bars: 0, kind: 'cut' }, now())
+
+    const midpointMs = midRecordingFraction(ms)
+    const startedAt = now()
+    const moments = stillMoments(ms)
+    const size = stillSize(canvas.width, canvas.height)
+    const snapshots: HTMLCanvasElement[] = []
+    let midFrame: SampledFrame | undefined
+    const tick = (): void => {
+      compositor.tick(now())
+      const elapsed = now() - startedAt
+      if (midFrame === undefined && elapsed >= midpointMs) {
+        midFrame = sample(canvas)
       }
+      if (size !== undefined && moments.length > 0 && elapsed >= (moments[0] ?? Infinity)) {
+        // A moment is spent whether or not the copy works: retrying a failing copy every frame
+        // would only repeat the failure.
+        moments.shift()
+        try {
+          snapshots.push(snapshot(canvas, size))
+        } catch (error) {
+          console.error('captureThumbnail: could not copy a still frame', error)
+        }
+      }
+      frame = requestAnimationFrame(tick)
     }
     frame = requestAnimationFrame(tick)
-  }
-  frame = requestAnimationFrame(tick)
 
-  try {
     const blob = await record(canvas, ms)
     return {
       blob,
@@ -246,6 +246,8 @@ export const captureThumbnail = async (
       stills: await encodeStills(snapshots, encode),
     }
   } finally {
+    // Everything after the compositor exists is inside this block: a clip edited into a syntax error
+    // after its probe passed throws from `load`, and a context left behind is one fewer for the show.
     if (frame !== undefined) {
       cancelAnimationFrame(frame)
     }
