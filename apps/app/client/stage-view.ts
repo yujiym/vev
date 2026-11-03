@@ -24,7 +24,7 @@ export const KEY_HELP: readonly (readonly [string, string])[] = [
   ['Shift+Space', 'Go now, or finish a running fade'],
   ['H', 'Hold'],
   ['B', 'Blackout'],
-  ['Esc', 'close the panel, or Freeze when none is open'],
+  ['Esc', 'close the menu, then the panel, or Freeze when neither is open'],
   ['C', 'open the steering chat'],
 ]
 
@@ -34,6 +34,83 @@ export type StagePanel =
   | { kind: 'chat' | 'library' | 'new-clip' | 'none' | 'playlist' | 'tracks' }
 
 export const NO_PANEL: StagePanel = { kind: 'none' }
+
+export type PanelKind = 'chat' | 'library' | 'new-clip' | 'playlist' | 'tracks'
+
+/** What choosing a menu entry does. The template only forwards it. */
+export type MenuAction =
+  | { id: OverlayId; kind: 'overlay' }
+  | { kind: 'cards' }
+  | { kind: 'fullscreen' }
+  | { kind: 'panel'; panel: PanelKind }
+
+export interface MenuEntry {
+  action: MenuAction
+  label: string
+  /** Chat only: a standing direction keeps steering after its panel is closed. */
+  note?: string
+  on: boolean
+  /** The state in words, so an entry reads the same without colour: `open`/`closed` for a panel, `on`/`off` for the rest. */
+  state: 'closed' | 'off' | 'on' | 'open'
+}
+
+export interface MenuSection {
+  entries: readonly MenuEntry[]
+  title: string
+}
+
+export interface MenuInput {
+  cardsShown: boolean
+  /** A standing direction is steering the candidates. */
+  directed: boolean
+  fullscreen: boolean
+  overlays: Readonly<Record<OverlayId, boolean>>
+  panel: StagePanel
+}
+
+const MENU_PANELS: readonly { kind: PanelKind; label: string }[] = [
+  { kind: 'playlist', label: 'Playlist' },
+  { kind: 'library', label: 'Library' },
+  { kind: 'new-clip', label: 'New clip' },
+  { kind: 'tracks', label: 'Tracks' },
+  { kind: 'chat', label: 'Chat' },
+]
+
+const toggle = (label: string, action: MenuAction, on: boolean): MenuEntry => ({
+  action,
+  label,
+  on,
+  state: on ? 'on' : 'off',
+})
+
+/**
+ * Everything the control row does not keep: the panels, what is drawn over the picture, and
+ * Fullscreen, each with its current state. The row holds only what a performer needs in the moment,
+ * because the audience sees it; whatever is here is one click further away on purpose.
+ */
+export const menuSections = (input: MenuInput): readonly MenuSection[] => [
+  {
+    entries: MENU_PANELS.map(({ kind, label }): MenuEntry => {
+      const on = input.panel.kind === kind
+      const entry: MenuEntry = {
+        action: { kind: 'panel', panel: kind },
+        label,
+        on,
+        state: on ? 'open' : 'closed',
+      }
+      return kind === 'chat' && input.directed ? { ...entry, note: 'steering' } : entry
+    }),
+    title: 'Panels',
+  },
+  {
+    entries: [
+      toggle('Cards', { kind: 'cards' }, input.cardsShown),
+      ...OVERLAY_IDS.map((id) => toggle(OVERLAY_LABELS[id], { id, kind: 'overlay' }, input.overlays[id])),
+    ],
+    title: 'On the picture',
+  },
+  { entries: [toggle('Fullscreen', { kind: 'fullscreen' }, input.fullscreen)], title: 'Window' },
+]
 
 /** The panel a button asks for: its own again closes it. */
 export const togglePanel = (current: StagePanel, requested: StagePanel): StagePanel =>

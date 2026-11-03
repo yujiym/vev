@@ -140,15 +140,38 @@ export const rowButton = (page, name) => page.locator('.row').getByRole('button'
 /** The panel on screen. Forms stay mounted but hidden once opened, so "visible" is part of the question. */
 export const panel = (page) => page.locator('aside:visible')
 
-/** Clicks a control-row toggle, and waits for what it opens when that is a panel. */
+/**
+ * Chooses an entry from the Menu: panels, what is drawn over the picture, and Fullscreen live
+ * there and nowhere else. Opens the menu when it is shut, and choosing closes it again.
+ */
+export const menuItem = async (page, label) => {
+  if ((await page.locator('.menu').count()) === 0) {
+    await rowButton(page, 'Menu').click()
+    await page.locator('.menu').waitFor({ timeout: 10_000 })
+  }
+  await page.locator(`.menu [data-menu="${label}"]`).click()
+}
+
+/** What the menu says about an entry: `open`/`closed` for a panel, `on`/`off` for the rest. */
+export const menuState = async (page, label) => {
+  if ((await page.locator('.menu').count()) === 0) {
+    await rowButton(page, 'Menu').click()
+    await page.locator('.menu').waitFor({ timeout: 10_000 })
+  }
+  const state = flat((await page.locator(`.menu [data-menu="${label}"] .entry-state`).textContent()) ?? '')
+  await rowButton(page, 'Menu').click()
+  return state
+}
+
+/** Opens a panel from the Menu, and waits for it. */
 export const openPanel = async (page, name) => {
-  await rowButton(page, name).click()
+  await menuItem(page, name)
   await panel(page).waitFor({ timeout: 10_000 })
 }
 
 /** Turns the Now overlay on, which is how a driver reads what is playing. */
 export const showNow = async (page) => {
-  await rowButton(page, 'Now').click()
+  await menuItem(page, 'Now')
   await page.locator('.now-title').waitFor({ timeout: 10_000 })
 }
 

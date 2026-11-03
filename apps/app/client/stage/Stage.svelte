@@ -3,8 +3,8 @@
   import type { Control } from '../control.ts'
   import type { Live, LiveView } from '../live.ts'
   import { createLive } from '../live.ts'
-  import type { OverlayId, StagePanel } from '../stage-view.ts'
-  import { NO_PANEL, registrationGate, stageNotices, togglePanel } from '../stage-view.ts'
+  import type { MenuAction, OverlayId, StagePanel } from '../stage-view.ts'
+  import { menuSections, NO_PANEL, registrationGate, stageNotices, togglePanel } from '../stage-view.ts'
   import { guardReload, keyTargetOf, toggleFullscreen, watchFullscreen } from '../stage-window.ts'
   import { startStage } from '../stage.ts'
   import CandidateCards from './CandidateCards.svelte'
@@ -39,6 +39,7 @@
     status: false,
   })
   let fullscreen = $state(false)
+  let menuOpen = $state(false)
   let rowHeight = $state(32)
 
   /** Mounted on first use and kept, so a form survives closing its panel with half a clip typed into it. */
@@ -48,6 +49,16 @@
   const notices = $derived(view === undefined ? [] : stageNotices(view, pictureFault))
   const gate = $derived(view === undefined ? ({ kind: 'allowed' } as const) : registrationGate(view.control))
 
+  const sections = $derived(
+    menuSections({
+      cardsShown,
+      directed: view?.live.direction !== undefined,
+      fullscreen,
+      overlays,
+      panel,
+    }),
+  )
+
   const openPanel = (requested: StagePanel): void => {
     panel = togglePanel(panel, requested)
     if (panel.kind === 'new-clip') {
@@ -55,6 +66,32 @@
     }
     if (panel.kind === 'track-editor') {
       editingTrack = panel.id
+    }
+  }
+
+  /** Choosing from the menu closes it, so what it opened is not left under its popover. */
+  const chooseFromMenu = (action: MenuAction): void => {
+    menuOpen = false
+    switch (action.kind) {
+      case 'cards': {
+        cardsShown = !cardsShown
+        break
+      }
+      case 'fullscreen': {
+        void toggleFullscreen()
+        break
+      }
+      case 'overlay': {
+        overlays[action.id] = !overlays[action.id]
+        break
+      }
+      case 'panel': {
+        openPanel({ kind: action.panel })
+        break
+      }
+      default: {
+        break
+      }
     }
   }
 
@@ -84,6 +121,9 @@
         onChat: () => {
           openPanel({ kind: 'chat' })
         },
+        onCloseMenu: () => {
+          menuOpen = false
+        },
         onClosePanel: () => {
           panel = NO_PANEL
         },
@@ -104,7 +144,7 @@
             shiftKey: event.shiftKey,
             target: keyTargetOf(event.target),
           },
-          { panelOpen: panel.kind !== 'none' },
+          { menuOpen, panelOpen: panel.kind !== 'none' },
         )
         if (handled) {
           event.preventDefault()
@@ -146,16 +186,12 @@
 
   <div bind:clientHeight={rowHeight} class="row-holder">
     <ControlRow
-      {cardsShown}
       {control}
-      {fullscreen}
       {live}
-      onFullscreen={() => void toggleFullscreen()}
-      onPanel={openPanel}
-      onToggleCards={() => (cardsShown = !cardsShown)}
-      onToggleOverlay={(id) => (overlays[id] = !overlays[id])}
-      {overlays}
-      {panel}
+      {menuOpen}
+      onMenu={() => (menuOpen = !menuOpen)}
+      onMenuChoose={chooseFromMenu}
+      {sections}
       {view}
     />
   </div>

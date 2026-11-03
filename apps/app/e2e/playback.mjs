@@ -20,6 +20,7 @@ import {
   flat,
   nextTitle,
   openBrowser,
+  menuItem,
   openPanel,
   openStage,
   panel,
@@ -163,7 +164,7 @@ await page.route(`**/api/clips/${victim.id}`, async (route) => {
 })
 const keptTitle = flat((await page.locator('.now-title').textContent()) ?? '')
 // Closing and reopening the panel is what makes it fetch the track list again.
-await rowButton(page, 'Playlist').click()
+await menuItem(page, 'Playlist')
 await openPanel(page, 'Playlist')
 await panel(page).locator('#track-select').selectOption({ label: broken.title })
 await panel(page).getByRole('button', { exact: true, name: 'Load' }).click()

@@ -7,6 +7,8 @@ import type { LiveView } from './live.ts'
 import {
   cardBadge,
   creditLine,
+  KEY_HELP,
+  menuSections,
   NO_PANEL,
   registrationGate,
   stageNotices,
@@ -192,5 +194,75 @@ describe(togglePanel, () => {
     expect(togglePanel(NO_PANEL, { kind: 'chat' })).toStrictEqual({ kind: 'chat' })
     expect(togglePanel({ kind: 'chat' }, { kind: 'library' })).toStrictEqual({ kind: 'library' })
     expect(togglePanel({ kind: 'library' }, { kind: 'library' })).toStrictEqual(NO_PANEL)
+  })
+})
+
+const entry = (state: Parameters<typeof menuSections>[0], label: string) =>
+  menuSections(state)
+    .flatMap((section) => section.entries)
+    .find((candidate) => candidate.label === label)
+
+describe(menuSections, () => {
+  const idle = {
+    cardsShown: true,
+    directed: false,
+    fullscreen: false,
+    overlays: { code: false, credit: false, keys: false, status: false },
+    panel: NO_PANEL,
+  }
+
+  it('holds the panels, the overlays and Fullscreen, and nothing the transport row keeps', () => {
+    const labels = menuSections(idle).flatMap((section) => section.entries.map((item) => item.label))
+    expect(labels).toStrictEqual([
+      'Playlist',
+      'Library',
+      'New clip',
+      'Tracks',
+      'Chat',
+      'Cards',
+      'Credit',
+      'Code',
+      'Now',
+      'Keys',
+      'Fullscreen',
+    ])
+  })
+
+  it('says what is on and what is off, in words, beside every entry', () => {
+    const state = {
+      ...idle,
+      fullscreen: true,
+      overlays: { ...idle.overlays, status: true },
+      panel: { kind: 'library' } as const,
+    }
+    expect(entry(state, 'Library')).toMatchObject({ on: true, state: 'open' })
+    expect(entry(state, 'Playlist')).toMatchObject({ on: false, state: 'closed' })
+    expect(entry(state, 'Now')).toMatchObject({ on: true, state: 'on' })
+    expect(entry(state, 'Credit')).toMatchObject({ on: false, state: 'off' })
+  })
+
+  it('treats Cards and Fullscreen as toggles like the overlays', () => {
+    const state = { ...idle, cardsShown: false, fullscreen: true }
+    expect(entry(state, 'Cards')).toMatchObject({ on: false, state: 'off' })
+    expect(entry(state, 'Fullscreen')).toMatchObject({ on: true, state: 'on' })
+  })
+
+  it('names the action each entry takes, so the template decides nothing', () => {
+    expect(entry(idle, 'Tracks')?.action).toStrictEqual({ kind: 'panel', panel: 'tracks' })
+    expect(entry(idle, 'Code')?.action).toStrictEqual({ id: 'code', kind: 'overlay' })
+    expect(entry(idle, 'Cards')?.action).toStrictEqual({ kind: 'cards' })
+    expect(entry(idle, 'Fullscreen')?.action).toStrictEqual({ kind: 'fullscreen' })
+  })
+
+  it('marks Chat when a direction is steering the show, because closing the panel does not end it', () => {
+    expect(entry({ ...idle, directed: true }, 'Chat')).toMatchObject({ note: 'steering' })
+    expect(entry(idle, 'Chat')?.note).toBeUndefined()
+  })
+})
+
+describe('the key help', () => {
+  it('says Esc closes the menu first', () => {
+    const esc = KEY_HELP.find(([key]) => key === 'Esc')
+    expect(esc?.[1]).toContain('menu')
   })
 })

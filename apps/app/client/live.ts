@@ -389,6 +389,7 @@ export const decisionStatus = (state: LiveState): DecisionStatus => {
 export type LiveKeyAction =
   | { kind: 'blackout' }
   | { kind: 'chat' }
+  | { kind: 'close-menu' }
   | { kind: 'close-panel' }
   | { index: 0 | 1 | 2; kind: 'choose-candidate' }
   | { kind: 'freeze' }
@@ -436,14 +437,17 @@ export const isTextEntry = (target: KeyTarget | undefined): boolean =>
 /**
  * Spec §12's key map, as data rather than a chain in the template.
  *
- * `Esc` closes an open panel before it means Freeze, wherever the focus is. Typing in a field
+ * `Esc` closes the open menu, then an open panel, before it means Freeze, wherever the focus is. Typing in a field
  * suspends every single-key shortcut, because those keys are the performer's sentence, not the
  * transport. A panel that is merely open does not: the show is still running behind it.
  */
 export const keyAction = (
   event: KeyEventLike,
-  options: { inPanel?: boolean; panelOpen: boolean; textEntry: boolean },
+  options: { inPanel?: boolean; menuOpen?: boolean; panelOpen: boolean; textEntry: boolean },
 ): LiveKeyAction | undefined => {
+  if (event.key === 'Escape' && options.menuOpen === true) {
+    return { kind: 'close-menu' }
+  }
   if (event.key === 'Escape' && options.panelOpen) {
     return { kind: 'close-panel' }
   }
@@ -498,6 +502,7 @@ export interface CreateLiveOptions {
   /** Wall-clock now, per spec: `Date.now()`. */
   now?: () => number
   onChat?: () => void
+  onCloseMenu?: () => void
   onClosePanel?: () => void
 }
 
@@ -510,7 +515,10 @@ export interface Live {
   /** Turns a sentence into a standing direction and asks for new candidates. Never moves the show. */
   interpret: (text: string) => void
   /** Handles one key event; returns true when it consumed the key. */
-  key: (event: KeyEventLike & { target?: KeyTarget }, options: { panelOpen: boolean }) => boolean
+  key: (
+    event: KeyEventLike & { target?: KeyTarget },
+    options: { menuOpen?: boolean; panelOpen: boolean },
+  ) => boolean
   /** The performer's candidate choice: arms the switch for the next bar (§7). */
   pickCandidate: (clipId: string) => void
   /** The track being played, or `undefined` once it leaves one. */
@@ -573,6 +581,9 @@ export const createLive = (options: CreateLiveOptions): Live => {
     now = Date.now,
     onChat = () => {
       // No chat surface attached — the key is still consumed elsewhere.
+    },
+    onCloseMenu = () => {
+      // Same.
     },
     onClosePanel = () => {
       // Same.
@@ -924,6 +935,7 @@ export const createLive = (options: CreateLiveOptions): Live => {
     key: (event, keyOptions) => {
       const action = keyAction(event, {
         inPanel: event.target?.inPanel,
+        menuOpen: keyOptions.menuOpen,
         panelOpen: keyOptions.panelOpen,
         textEntry: isTextEntry(event.target),
       })
@@ -938,6 +950,10 @@ export const createLive = (options: CreateLiveOptions): Live => {
         }
         case 'chat': {
           onChat()
+          return true
+        }
+        case 'close-menu': {
+          onCloseMenu()
           return true
         }
         case 'close-panel': {

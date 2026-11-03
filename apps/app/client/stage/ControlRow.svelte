@@ -4,53 +4,43 @@
   import { controlHints } from '../control.ts'
   import type { Live, LiveView } from '../live.ts'
   import { nextTransitionChoice, transitionLabel } from '../live.ts'
-  import type { OverlayId, StagePanel } from '../stage-view.ts'
-  import { OVERLAY_IDS, OVERLAY_LABELS } from '../stage-view.ts'
+  import type { MenuAction, MenuSection } from '../stage-view.ts'
+  import { insideMenu } from '../stage-window.ts'
 
   interface Props {
-    cardsShown: boolean
     control: Control | undefined
-    fullscreen: boolean
     live: Live | undefined
-    onFullscreen: () => void
-    onPanel: (panel: StagePanel) => void
-    onToggleCards: () => void
-    onToggleOverlay: (id: OverlayId) => void
-    overlays: Readonly<Record<OverlayId, boolean>>
-    panel: StagePanel
+    menuOpen: boolean
+    onMenu: () => void
+    onMenuChoose: (action: MenuAction) => void
+    sections: readonly MenuSection[]
     view: LiveView | undefined
   }
 
-  const {
-    cardsShown,
-    control,
-    fullscreen,
-    live,
-    onFullscreen,
-    onPanel,
-    onToggleCards,
-    onToggleOverlay,
-    overlays,
-    panel,
-    view,
-  }: Props = $props()
+  const { control, live, menuOpen, onMenu, onMenuChoose, sections, view }: Props = $props()
 
   const hints = $derived(view === undefined ? undefined : controlHints(view.control))
   const snapshot = $derived(view?.control)
   const panic = $derived(snapshot?.panic ?? 'none')
   const decision = $derived(view?.live.decision)
   const transition = $derived(view?.live.next?.transition ?? snapshot?.transition)
-  const direction = $derived(view?.live.direction)
-
-  const PANELS: readonly { kind: 'chat' | 'library' | 'new-clip' | 'playlist' | 'tracks'; label: string }[] =
-    [
-      { kind: 'playlist', label: 'Playlist' },
-      { kind: 'library', label: 'Library' },
-      { kind: 'new-clip', label: 'New clip' },
-      { kind: 'tracks', label: 'Tracks' },
-      { kind: 'chat', label: 'Chat' },
-    ]
+  const directed = $derived(view?.live.direction !== undefined)
+  const menuTitle = $derived(
+    sections
+      .flatMap((section) => section.entries)
+      .filter((entry) => entry.on)
+      .map((entry) => entry.label)
+      .join(', '),
+  )
 </script>
+
+<svelte:window
+  onpointerdown={(event) => {
+    if (menuOpen && !insideMenu(event.target)) {
+      onMenu()
+    }
+  }}
+/>
 
 <header class="row">
   <div class="group">
@@ -116,33 +106,39 @@
     </span>
   </div>
 
-  <div class="group">
-    {#each PANELS as entry (entry.kind)}
-      <button
-        aria-pressed={panel.kind === entry.kind}
-        class:active={panel.kind === entry.kind}
-        class:directed={entry.kind === 'chat' && direction !== undefined}
-        onclick={() => onPanel({ kind: entry.kind })}
-        type="button">{entry.label}</button
-      >
-    {/each}
-  </div>
-
-  <div class="group">
-    <button aria-pressed={cardsShown} class:active={cardsShown} onclick={onToggleCards} type="button"
-      >Cards</button
+  <div class="group menu-root" data-menu-root>
+    <button
+      aria-expanded={menuOpen}
+      aria-haspopup="menu"
+      class:active={menuOpen}
+      class:directed
+      onclick={onMenu}
+      title={menuTitle === '' ? 'Panels, overlays and Fullscreen' : `On now: ${menuTitle}`}
+      type="button">Menu</button
     >
-    {#each OVERLAY_IDS as id (id)}
-      <button
-        aria-pressed={overlays[id]}
-        class:active={overlays[id]}
-        onclick={() => onToggleOverlay(id)}
-        type="button">{OVERLAY_LABELS[id]}</button
-      >
-    {/each}
-    <button aria-pressed={fullscreen} class:active={fullscreen} onclick={onFullscreen} type="button"
-      >Fullscreen</button
-    >
+    {#if menuOpen}
+      <div aria-label="Menu" class="menu" role="menu">
+        {#each sections as section (section.title)}
+          <div aria-label={section.title} role="group">
+            <span class="menu-title">{section.title}</span>
+            {#each section.entries as entry (entry.label)}
+              <button
+                aria-checked={entry.on}
+                class:on={entry.on}
+                data-menu={entry.label}
+                onclick={() => onMenuChoose(entry.action)}
+                role="menuitemcheckbox"
+                type="button"
+              >
+                <span class="entry-label">{entry.label}</span>
+                {#if entry.note}<span class="note">{entry.note}</span>{/if}
+                <span class="entry-state">{entry.state}</span>
+              </button>
+            {/each}
+          </div>
+        {/each}
+      </div>
+    {/if}
   </div>
 </header>
 
@@ -164,9 +160,10 @@
     gap: 0.2rem;
   }
 
+  /* Near-opaque: the row sits on whatever the clip draws, and over white a see-through button lets it grey out. */
   button,
   .readout {
-    background: rgb(8 10 14 / 78%);
+    background: rgb(8 10 14 / 92%);
     border: 1px solid rgb(255 255 255 / 34%);
     border-radius: 0.28rem;
     color: #f4f6fa;
@@ -187,9 +184,12 @@
     background: rgb(40 46 60 / 92%);
   }
 
+  /* Disabled is dimmer in its border and its weight, not in its text, which has to stay readable over a bright picture. */
   button:disabled {
-    color: #98a0ae;
+    border-color: rgb(255 255 255 / 20%);
+    color: #b4bcc9;
     cursor: not-allowed;
+    font-weight: 500;
   }
 
   button.active {
@@ -241,5 +241,66 @@
 
   .bad .dot {
     background: #ff6470;
+  }
+
+  .menu-root {
+    position: relative;
+  }
+
+  /* Below the row, never over it: Blackout and Freeze stay one click away with the menu open. */
+  .menu {
+    background: rgb(10 12 16 / 96%);
+    border: 1px solid rgb(255 255 255 / 34%);
+    border-radius: 0.35rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    min-width: 13rem;
+    padding: 0.4rem;
+    pointer-events: auto;
+    position: absolute;
+    right: 0;
+    top: calc(100% + 0.25rem);
+    z-index: 40;
+  }
+
+  .menu > [role='group'] {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+  }
+
+  .menu-title {
+    color: #b4bcc9;
+    font-size: 0.6rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .menu button {
+    align-items: baseline;
+    display: flex;
+    gap: 0.5rem;
+    justify-content: space-between;
+    text-align: left;
+  }
+
+  .entry-label {
+    flex: 1;
+  }
+
+  .note {
+    color: #ffb454;
+    font-weight: 500;
+  }
+
+  .entry-state {
+    color: #b4bcc9;
+    font-weight: 500;
+  }
+
+  .menu button.on .entry-state {
+    color: #6ef2c0;
+    font-weight: 700;
   }
 </style>

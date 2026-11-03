@@ -307,6 +307,28 @@ describe('the key map', () => {
     expect(keyOf('Escape', { panelOpen: false })).toStrictEqual({ kind: 'freeze' })
   })
 
+  it('Esc closes the menu before the panel, and the panel before it means Freeze', () => {
+    const options = { panelOpen: true, textEntry: false }
+    expect(keyAction({ key: 'Escape' }, { ...options, menuOpen: true })).toStrictEqual({ kind: 'close-menu' })
+    expect(keyAction({ key: 'Escape' }, { ...options, menuOpen: true, textEntry: true })).toStrictEqual({
+      kind: 'close-menu',
+    })
+    expect(keyAction({ key: 'Escape' }, { ...options, menuOpen: false })).toStrictEqual({
+      kind: 'close-panel',
+    })
+    expect(
+      keyAction({ key: 'Escape' }, { menuOpen: true, panelOpen: false, textEntry: false }),
+    ).toStrictEqual({
+      kind: 'close-menu',
+    })
+  })
+
+  it('keeps every other key working with the menu open, because the show runs behind it', () => {
+    expect(keyAction({ key: 'b' }, { menuOpen: true, panelOpen: false, textEntry: false })).toStrictEqual({
+      kind: 'blackout',
+    })
+  })
+
   it('ignores modified keys so browser shortcuts still work', () => {
     expect(keyAction({ ctrlKey: true, key: 'b' }, { panelOpen: false, textEntry: false })).toBeUndefined()
     expect(keyAction({ key: 'b', metaKey: true }, { panelOpen: false, textEntry: false })).toBeUndefined()

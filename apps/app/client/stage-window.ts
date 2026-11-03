@@ -68,3 +68,7 @@ export const keyTargetOf = (target: EventTarget | null): KeyTarget | undefined =
         tagName: target.tagName,
       }
     : undefined
+
+/** Whether a pointer landed on the menu or its button, so a click anywhere else on the stage closes it. */
+export const insideMenu = (target: EventTarget | null): boolean =>
+  target instanceof Element && target.closest('[data-menu-root]') !== null

@@ -14,6 +14,7 @@ import {
   nextTitle,
   nowTitle,
   openBrowser,
+  menuItem,
   openPanel,
   openStage,
   panel,
@@ -76,7 +77,7 @@ check(
   await nextTitle(page),
 )
 check('and nothing has armed itself', (await page.locator('.card.chosen').count()) === 0)
-await rowButton(page, 'Playlist').click()
+await menuItem(page, 'Playlist')
 await threeCards()
 
 // --- clicking a card outlines it and fires on the next bar, with nothing else pressed ---
@@ -124,7 +125,7 @@ check(
 )
 await openPanel(page, 'Playlist')
 await panel(page).getByRole('button', { exact: true, name: 'Leave' }).click()
-await rowButton(page, 'Playlist').click()
+await menuItem(page, 'Playlist')
 await until(page, () => !document.body.textContent.includes('Fade in progress'), { timeout: 20_000 })
 await threeCards()
 

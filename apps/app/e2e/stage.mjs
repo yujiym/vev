@@ -12,6 +12,8 @@ import {
   flat,
   nowTitle,
   openBrowser,
+  menuItem,
+  menuState,
   openPanel,
   openStage,
   panel,
@@ -143,6 +145,99 @@ check(
   }),
 )
 
+// --- the row keeps what a performer needs in the moment, and the Menu holds the rest ---
+const rowNames = await page.locator('.row button').allTextContents()
+const KEPT = ['Hold', 'Back', 'Go', 'Go now', 'Blackout', 'Freeze', 'TAP', 'Auto', 'Menu']
+check(
+  'the row holds only the performer’s controls and the Menu',
+  KEPT.every((name) => rowNames.map((entry) => flat(entry)).includes(name)) &&
+    rowNames.length === KEPT.length + 1,
+  rowNames.map((entry) => flat(entry)).join(' | '),
+)
+check(
+  'and none of the panels, overlays or Fullscreen',
+  ![
+    'Playlist',
+    'Library',
+    'New clip',
+    'Tracks',
+    'Chat',
+    'Cards',
+    'Credit',
+    'Code',
+    'Now',
+    'Keys',
+    'Fullscreen',
+  ].some((name) => rowNames.map((entry) => flat(entry)).includes(name)),
+)
+const rowBox = async () => await page.locator('.row').boundingBox()
+const buttonHeight = (await rowButton(page, 'Hold').boundingBox()).height
+check(
+  'the row is one line at 1280 wide',
+  (await rowBox()).height < buttonHeight * 2,
+  `row ${(await rowBox()).height}px, a button ${buttonHeight}px`,
+)
+await rowButton(page, 'Menu').click()
+await page.locator('.menu').waitFor({ timeout: 10_000 })
+const menuBox = await page.locator('.menu').boundingBox()
+check(
+  'the menu opens below the row, never over Blackout or Freeze',
+  menuBox.y >= (await rowBox()).y + (await rowBox()).height - 1,
+  `menu top ${menuBox.y}, row bottom ${(await rowBox()).y + (await rowBox()).height}`,
+)
+const menuStates = {}
+for (const name of ['Playlist', 'Cards', 'Now', 'Fullscreen']) {
+  menuStates[name] = flat(await page.locator(`.menu [data-menu="${name}"] .entry-state`).textContent())
+}
+check(
+  'every entry says whether it is on',
+  menuStates.Playlist === 'closed' &&
+    menuStates.Cards === 'on' &&
+    menuStates.Now === 'off' &&
+    menuStates.Fullscreen === 'off',
+  JSON.stringify(menuStates),
+)
+await shot(page, '40-stage-menu-open')
+await rowButton(page, 'Blackout').click()
+check('Blackout is still one click with the menu open', (await page.locator('.blackout').count()) === 1)
+await rowButton(page, 'Blackout').click()
+await rowButton(page, 'Menu').click()
+await page.keyboard.press('Escape')
+check(
+  'Esc closes the menu before it means Freeze',
+  (await until(page, () => document.querySelector('.menu') === null)) &&
+    (await rowButton(page, 'Freeze').getAttribute('aria-pressed')) !== 'true',
+)
+await rowButton(page, 'Menu').click()
+await page.mouse.click(640, 500)
+check('a click on the picture closes the menu', (await page.locator('.menu').count()) === 0)
+await menuItem(page, 'Now')
+check(
+  'choosing an entry closes the menu and the entry then reads on',
+  (await page.locator('.menu').count()) === 0 && (await menuState(page, 'Now')) === 'on',
+)
+await menuItem(page, 'Now')
+
+// What the row does below 1280: its groups wrap onto more lines, and the panels and overlays start under the last one.
+await page.setViewportSize({ height: 900, width: 960 })
+await page.waitForTimeout(300)
+const wrapped = await rowBox()
+console.log(
+  `INFO  row at 960 wide: ${wrapped.height}px high, ${Math.round(wrapped.height / buttonHeight)} line(s)`,
+)
+await shot(page, '41-stage-narrow-960')
+await page.setViewportSize({ height: 900, width: 640 })
+await page.waitForTimeout(300)
+console.log(`INFO  row at 640 wide: ${(await rowBox()).height}px high`)
+await shot(page, '42-stage-narrow-640')
+check(
+  'a narrow window keeps every control reachable: the Menu button is inside the viewport',
+  (await rowButton(page, 'Menu').boundingBox()).x + (await rowButton(page, 'Menu').boundingBox()).width <=
+    640,
+)
+await page.setViewportSize({ height: 900, width: 1280 })
+await page.waitForTimeout(300)
+
 // --- a thumbnail shows its first frame, paused, and plays only when looked at ---
 const video = page.locator('.card video')
 check(
@@ -197,21 +292,48 @@ await earlyInBar()
 await page.locator('.card').nth(1).click()
 check('a chosen card has its outline', (await page.locator('.card.chosen').count()) === 1)
 await shot(page, '32-stage-chosen')
+
+// --- the same card again takes the choice back ---
+const playingBefore = await nowTitle(page)
+await page.locator('.card').nth(1).click()
+check(
+  'clicking the outlined card again removes the outline',
+  (await page.locator('.card.chosen').count()) === 0,
+)
+const noticeText = async () => flat((await page.locator('.notices').allTextContents()).join(' '))
+check('and nothing is armed any more', !(await noticeText()).includes('Next:'), await noticeText())
+await page.waitForTimeout(2600)
+check(
+  'so the bar passes and the picture carries on',
+  (await nowTitle(page)) === playingBefore,
+  await nowTitle(page),
+)
+await until(page, () => !document.body.textContent.includes('Fade in progress'), { timeout: 15_000 })
+await earlyInBar()
+await page.locator('.card').nth(1).click()
 await until(
   page,
   () => !document.querySelector('.card.chosen') && !document.body.textContent.includes('Fade in progress'),
   { timeout: 15_000 },
 )
+// A landing asks again, and a click on the old cards could name the clip that just landed.
+await until(
+  page,
+  () =>
+    document.querySelectorAll('.card').length === 3 &&
+    !document.querySelector('.decision')?.textContent?.includes('asking'),
+  { timeout: 20_000 },
+)
 await earlyInBar()
 await page.locator('.card').nth(1).click()
-await rowButton(page, 'Cards').click()
+await menuItem(page, 'Cards')
 check('the cards button hides them', (await page.locator('.card').count()) === 0)
 check(
   'and the armed clip is still named while they are hidden',
   (await page.locator('.notices').textContent()).includes('Next:'),
   flat(await page.locator('.notices').textContent()),
 )
-await rowButton(page, 'Cards').click()
+await menuItem(page, 'Cards')
 check('and shows them again', await until(page, () => document.querySelectorAll('.card').length === 3))
 await until(page, () => !document.querySelector('.card.chosen'), { timeout: 15_000 })
 
@@ -229,12 +351,12 @@ await rowButton(page, 'Blackout').click()
 await rowButton(page, 'Freeze').click()
 check('so is Freeze', (await rowButton(page, 'Freeze').getAttribute('aria-pressed')) === 'true')
 await rowButton(page, 'Freeze').click()
-await rowButton(page, 'Library').click()
+await menuItem(page, 'Library')
 
 // --- the info overlays ---
-await rowButton(page, 'Credit').click()
-await rowButton(page, 'Code').click()
-await rowButton(page, 'Keys').click()
+await menuItem(page, 'Credit')
+await menuItem(page, 'Code')
+await menuItem(page, 'Keys')
 const playingTitle = await nowTitle(page)
 check(
   'the credit overlay reads title, author and licence',
@@ -271,10 +393,10 @@ const showClip = async (clipId, name) => {
   }, clipId)
   await page.reload({ waitUntil: 'networkidle' })
   await until(page, () => document.querySelectorAll('.card').length === 3, { timeout: 20_000 })
-  await rowButton(page, 'Credit').click()
-  await rowButton(page, 'Code').click()
-  await rowButton(page, 'Keys').click()
-  await rowButton(page, 'Now').click()
+  await menuItem(page, 'Credit')
+  await menuItem(page, 'Code')
+  await menuItem(page, 'Keys')
+  await menuItem(page, 'Now')
   await page.locator('.card').nth(1).click()
   await page.waitForTimeout(150)
   await shot(page, name)
@@ -318,7 +440,7 @@ check(
   await until(page, () => document.querySelector('.blackout') !== null),
 )
 await rowButton(page, 'Blackout').click()
-await rowButton(page, 'Now').click()
+await menuItem(page, 'Now')
 check('the same clip comes back', (await nowTitle(page)) === keptTitle, await nowTitle(page))
 check(
   'the same tempo comes back',
@@ -409,13 +531,13 @@ check('the recording ended rather than hanging', recordingEnded, flat(await form
 check('the show survives a lost registration context', await moving())
 
 // --- fullscreen ---
-await rowButton(page, 'Fullscreen').click()
+await menuItem(page, 'Fullscreen')
 check(
   'the fullscreen button takes the whole document fullscreen',
   await until(page, () => document.fullscreenElement === document.documentElement),
 )
 check('and the row is still there', await rowButton(page, 'Blackout').isVisible())
-await rowButton(page, 'Fullscreen').click()
+await menuItem(page, 'Fullscreen')
 check('and leaves again', await until(page, () => document.fullscreenElement === null))
 
 // --- a lost live context is said out loud ---
