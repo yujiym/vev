@@ -404,10 +404,25 @@ export interface KeyEventLike {
   shiftKey?: boolean
 }
 
+const KEY_ACTIONS = new Map<string, LiveKeyAction>([
+  ['1', { index: 0, kind: 'choose-candidate' }],
+  ['2', { index: 1, kind: 'choose-candidate' }],
+  ['3', { index: 2, kind: 'choose-candidate' }],
+  ['B', { kind: 'blackout' }],
+  ['C', { kind: 'chat' }],
+  ['Escape', { kind: 'freeze' }],
+  ['H', { kind: 'hold' }],
+  ['b', { kind: 'blackout' }],
+  ['c', { kind: 'chat' }],
+  ['h', { kind: 'hold' }],
+])
+
 const TEXT_INPUT_TAGS = new Set(['INPUT', 'SELECT', 'TEXTAREA'])
 
 /** The parts of a DOM element the key map reads; the page hands over `event.target` when it is one. */
 export interface KeyTarget {
+  /** The element is inside a panel, where a focused button keeps its own Space. */
+  inPanel?: boolean
   isContentEditable?: boolean
   tagName?: string
 }
@@ -427,48 +442,22 @@ export const isTextEntry = (target: KeyTarget | undefined): boolean =>
  */
 export const keyAction = (
   event: KeyEventLike,
-  options: { panelOpen: boolean; textEntry: boolean },
+  options: { inPanel?: boolean; panelOpen: boolean; textEntry: boolean },
 ): LiveKeyAction | undefined => {
   if (event.key === 'Escape' && options.panelOpen) {
     return { kind: 'close-panel' }
+  }
+  if (options.inPanel === true && event.key === ' ') {
+    return undefined
   }
   if (options.textEntry || event.ctrlKey === true || event.metaKey === true || event.altKey === true) {
     return undefined
   }
 
-  switch (event.key) {
-    case ' ':
-    case 'Spacebar': {
-      return event.shiftKey === true ? { kind: 'go-now' } : { kind: 'go' }
-    }
-    case '1': {
-      return { index: 0, kind: 'choose-candidate' }
-    }
-    case '2': {
-      return { index: 1, kind: 'choose-candidate' }
-    }
-    case '3': {
-      return { index: 2, kind: 'choose-candidate' }
-    }
-    case 'b':
-    case 'B': {
-      return { kind: 'blackout' }
-    }
-    case 'c':
-    case 'C': {
-      return { kind: 'chat' }
-    }
-    case 'Escape': {
-      return { kind: 'freeze' }
-    }
-    case 'h':
-    case 'H': {
-      return { kind: 'hold' }
-    }
-    default: {
-      return undefined
-    }
+  if (event.key === ' ' || event.key === 'Spacebar') {
+    return event.shiftKey === true ? { kind: 'go-now' } : { kind: 'go' }
   }
+  return KEY_ACTIONS.get(event.key)
 }
 
 /** A track as the live screen needs it: id and mode for the request, steps for the timeline and sections. */
@@ -932,6 +921,7 @@ export const createLive = (options: CreateLiveOptions): Live => {
     },
     key: (event, keyOptions) => {
       const action = keyAction(event, {
+        inPanel: event.target?.inPanel,
         panelOpen: keyOptions.panelOpen,
         textEntry: isTextEntry(event.target),
       })

@@ -294,6 +294,13 @@ describe('the key map', () => {
     expect(keyOf('1', { panelOpen: true })).toStrictEqual({ index: 0, kind: 'choose-candidate' })
   })
 
+  it('leaves Space to a button focused inside a panel, and only Space', () => {
+    expect(keyAction({ key: ' ' }, { inPanel: true, panelOpen: true, textEntry: false })).toBeUndefined()
+    expect(keyAction({ key: 'b' }, { inPanel: true, panelOpen: true, textEntry: false })).toStrictEqual({
+      kind: 'blackout',
+    })
+  })
+
   it('Esc closes an open panel before it means Freeze, wherever the focus is', () => {
     expect(keyOf('Escape', { panelOpen: true })).toStrictEqual({ kind: 'close-panel' })
     expect(keyOf('Escape', { panelOpen: true, textEntry: true })).toStrictEqual({ kind: 'close-panel' })
@@ -737,17 +744,12 @@ describe('createLive with a track and an armed switch', () => {
     expect(control.getSnapshot().fading).toBe(true)
 
     live.pickCandidate('y')
-
-    expect(control.getSnapshot()).toMatchObject({
-      chosenClipId: 'y',
-      next: { clipId: 'x' },
-      transition: FADE,
-    })
-    expect(live.getSnapshot().live.next).toMatchObject({ clipId: 'x', transition: FADE })
-    expect(live.getSnapshot().live.pickedClipId).toBe('y')
-
     live.chooseTransition(CUT)
-    expect(control.getSnapshot().transition).toStrictEqual(FADE)
+
+    expect(live.getSnapshot()).toMatchObject({
+      control: { chosenClipId: 'y', next: { clipId: 'x' }, transition: FADE },
+      live: { next: { clipId: 'x', transition: FADE }, pickedClipId: 'y' },
+    })
 
     advance(6000)
     expect(live.getSnapshot()).toMatchObject({
