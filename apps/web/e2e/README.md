@@ -11,7 +11,7 @@ Three scripts that open the M2 screens in a real Chromium and assert on what is 
 Start the app first, in another terminal — the built SPA served by the local Worker, which is one origin for both the pages and the API:
 
 ```bash
-pnpm live          # builds apps/web, then cf dev --mode development on 127.0.0.1:8787
+pnpm live          # builds apps/web and apps/api, then vp preview on 127.0.0.1:8787
 ```
 
 Then, from the repository root:
@@ -32,20 +32,20 @@ Each script exits non-zero if any check fails, and prints one `PASS`/`FAIL` line
 
 ## If a run looks broken, check for an orphaned Worker first
 
-`wrangler dev` leaves `workerd` child processes behind when it is killed abruptly, and they are the most likely reason a driver misbehaves in a way that has nothing to do with the code:
+An interrupted server can leave `workerd` child processes behind when it is killed abruptly, and they are the most likely reason a driver misbehaves in a way that has nothing to do with the code:
 
 - One still holding `:8787` makes the next `pnpm live` die on bind — so the drivers talk to the **old** Worker, quite possibly serving a **stale build**.
-- One still holding an open handle on `apps/api/.wrangler/state` keeps the **old database** alive after that directory has been renamed or deleted. A rename does not close a file handle: the process keeps writing to the inode, so a run that looks like it is exercising a fresh database is not. This cost a reviewer real time.
+- One still holding an open handle on `apps/api/.void` keeps the **old database** alive after that directory has been renamed or deleted. A rename does not close a file handle: the process keeps writing to the inode, so a run that looks like it is exercising a fresh database is not. This cost a reviewer real time.
 
 Check and clear before blaming a driver:
 
 ```bash
 lsof -i :8787                 # or: ss -lptn 'sport = :8787'
-pgrep -af 'wrangler|workerd'
-pkill -f workerd; pkill -f wrangler
+pgrep -af workerd
+kill <the PIDs from this checkout>
 ```
 
-Then confirm the port is actually free (`curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8787/api/health` prints `000`) before starting `pnpm live` again. If you are resetting the database, stop every one of those processes **first**, then remove `apps/api/.wrangler/state`.
+Then confirm the port is actually free (`curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8787/api/health` prints `000`) before starting `pnpm live` again. If you are resetting the database, stop every one of those processes **first**, then remove `apps/api/.void`.
 
 ## What they check
 
@@ -59,7 +59,7 @@ Then confirm the port is actually free (`curl -s -o /dev/null -w '%{http_code}' 
 node apps/web/e2e/seed.mjs
 ```
 
-It writes `annotation_status` / `reviewed` / `energy` / `tags` straight into the local D1 file with `pnpm exec cf d1 raw <local-uuid> --local --persist-to .wrangler/state --sql <sql>` from `apps/api`, because those columns are server-owned (there is no API for them, by design) and annotation cannot run in local mode at all — no AI binding, no queue (§15.3). Those two annotated states are exactly what the library grid has to tell apart, so they have to come from somewhere.
+It writes `annotation_status` / `reviewed` / `energy` / `tags` straight into the local D1 file with `pnpm exec void db execute` from `apps/api`, because those columns are server-owned (there is no API for them, by design) and annotation cannot run in local mode at all — no AI binding, no queue (§15.3). Those two annotated states are exactly what the library grid has to tell apart, so they have to come from somewhere.
 
 There is no DELETE route for tracks, so each `editor.mjs` / `playback.mjs` run leaves a track behind in the local database. That is why their titles carry a timestamp. A local dev D1 is scratch; `rm -rf apps/api/.wrangler/state` resets it, after which `pnpm live` re-applies migrations.
 

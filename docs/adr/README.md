@@ -16,3 +16,4 @@ ADRs are append-only. A decision that changes is recorded as a new ADR that supe
 - [0006 — cf as the Cloudflare CLI](0006-cf-cli.md): TypeScript Worker configuration and cf commands, with Wrangler retained for bundling and local D1 compatibility.
 - [0007 — Replace the local D1 identity](0007-local-d1-identity.md): preserve existing data under a valid local UUID, remove Wrangler D1 commands, and fix Miniflare watcher lifetime for cf CLI shutdown.
 - [0008 — Cloudflare Vite plugin for the API](0008-cloudflare-vite-plugin.md): remove the Wrangler config and direct dependency while retaining separate web and API packages.
+- [0009 — Void for the Worker](0009-void-for-the-worker.md): `apps/api` runs and deploys on Void, serving `apps/web`'s static build. Supersedes 0006 and 0008.

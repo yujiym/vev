@@ -24,12 +24,13 @@ Vite+ (`vp`) drives tests, lint (oxlint) and format (oxfmt) from the root `vite.
 
 - Entry points: `pnpm check` (typecheck + lint + fmt), `pnpm test`, `pnpm dev` (development, two processes), `pnpm live` (the built SPA served by the local Worker — how vev runs at a venue, §15.3).
 - Install with `pnpm install --frozen-lockfile`; pnpm provisions Node itself.
+- Use `void` or `cf` for Cloudflare operations, never `wrangler` (ADR 0009).
 - Keep lint strict. Suppress a rule only at the narrowest applicable line, with the reason: `// oxlint-disable-next-line <rule> -- <why>`.
 - `vite-plus`, `oxlint`, `oxfmt` and the `vite@*` override in `pnpm-workspace.yaml` move together; that file's comments say why.
 
 ## Repository status
 
-M0 (§18) is built: `apps/api` (Hono Worker; owns the D1/assets bindings and serves `apps/web`'s build as static assets), `apps/web` (SvelteKit SPA, `adapter-static`), and `packages/shared` (Valibot API schemas) all exist and are populated.
+M0 through M2 (§18) are built: `apps/api` (Void Worker around a Hono app; owns the D1/assets bindings and serves `apps/web`'s build as static assets), `apps/web` (SvelteKit SPA, `adapter-static`), and `packages/shared` (Valibot API schemas) all exist and are populated.
 
 The rest of §4.1's layout is still a target, not a scaffold to assume: `packages/engines`, `packages/ingest`, `packages/decision`, and `services/decision-server` do not exist yet.
 
