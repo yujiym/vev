@@ -35,7 +35,7 @@ All of it from a real `pnpm live` (`vp preview`, workerd) unless noted.
 - `/output` and `/studio` request only same-origin assets. A reload of `/output` restores its picture through the `hello` handshake.
 - `/studio/tracks/[id]` was driven from a list link and by a same-route history change from one track to another; `useParams()` followed the change both times, so it is used as is. fuda-sh found it going stale in `@void/solid` 1.4.0, which is a different adapter.
 - `VEV_TARGET=preview` and `production` build with `preview_urls` and `workers_dev` false, and the bindings, queue and routes match the previous package's. `void deploy` was not run.
-- `pnpm test` runs 588 tests, the same total as before the move.
+- `pnpm test` runs 588 tests. The base commit also ran 588: 218 in `apps/api` and 174 in `apps/web`, which are the 392 in `apps/app`, plus 196 in `packages/*`.
 
 ## Consequences
 
