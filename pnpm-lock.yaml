@@ -47,9 +47,6 @@ importers:
       '@vev/shared':
         specifier: workspace:*
         version: link:../../packages/shared
-      '@void/svelte':
-        specifier: 1.5.0
-        version: 1.5.0(@types/node@24.13.6)(esbuild@0.28.2)(jiti@2.7.0)(svelte@5.57.1)(tsx@4.23.15)(typescript@7.0.2)(void@1.5.0(@types/node@24.13.6)(esbuild@0.28.2)(kysely@0.29.7)(svelte@5.57.1)(tsx@4.23.15)(typescript@7.0.2)(valibot@1.5.0(typescript@7.0.2))(vitest@4.1.11)(workerd@1.20261101.1)(zod@4.6.7))(yaml@2.9.1)
       drizzle-orm:
         specifier: ^0.45.3
         version: 0.45.4(@cloudflare/workers-types@5.20261102.1)(better-sqlite3@13.0.3)(kysely@0.29.7)(mysql2@3.24.6(@types/node@24.13.6))(pg@8.23.1)
@@ -59,9 +56,6 @@ importers:
       hydra-synth:
         specifier: 1.4.0
         version: 1.4.0(supports-color@10.2.2)
-      svelte:
-        specifier: ^5.57.1
-        version: 5.57.1
       valibot:
         specifier: ^1.5.0
         version: 1.5.0(typescript@7.0.2)
@@ -72,9 +66,15 @@ importers:
       '@cloudflare/workers-types':
         specifier: ^5.20261102.1
         version: 5.20261102.1
+      '@void/svelte':
+        specifier: 1.5.0
+        version: 1.5.0(@types/node@24.13.6)(esbuild@0.28.2)(jiti@2.7.0)(svelte@5.57.1)(tsx@4.23.15)(typescript@7.0.2)(void@1.5.0(@types/node@24.13.6)(esbuild@0.28.2)(kysely@0.29.7)(svelte@5.57.1)(tsx@4.23.15)(typescript@7.0.2)(valibot@1.5.0(typescript@7.0.2))(vitest@4.1.11)(workerd@1.20261101.1)(zod@4.6.7))(yaml@2.9.1)
       drizzle-kit:
         specifier: ^0.31.11
         version: 0.31.11
+      svelte:
+        specifier: ^5.57.1
+        version: 5.57.1
       vitest:
         specifier: 4.1.11
         version: 4.1.11(@types/node@24.13.6)(@vitest/browser-preview@4.1.11)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(typescript@7.0.2)(yaml@2.9.1)

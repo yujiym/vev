@@ -20,17 +20,17 @@
     "@vev/engines": "workspace:*",
     "@vev/ingest": "workspace:*",
     "@vev/shared": "workspace:*",
-    "@void/svelte": "1.5.0",
     "drizzle-orm": "^0.45.3",
     "hono": "^4.13.16",
     "hydra-synth": "1.4.0",
-    "svelte": "^5.57.1",
     "valibot": "^1.5.0"
   },
   "devDependencies": {
     "@cloudflare/vitest-plugin": "1.4.11",
     "@cloudflare/workers-types": "^5.20261102.1",
+    "@void/svelte": "1.5.0",
     "drizzle-kit": "^0.31.11",
+    "svelte": "^5.57.1",
     "vitest": "4.1.11",
     "void": "1.5.0"
   }
