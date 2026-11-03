@@ -8,6 +8,8 @@ autoInstallPeers: false
 # Node is provisioned by pnpm itself via package.json devEngines.runtime
 # (onFail: download); no .node-version / version manager needed.
 allowBuilds:
+  # Void's local DB commands open the same D1 SQLite file as the dev server.
+  better-sqlite3: true
   esbuild: true
   workerd: true
 # vite-plus pins oxlint/oxfmt exactly; ultracite floats. Without these overrides
@@ -21,7 +23,7 @@ allowBuilds:
 # nominally distinct Plugin/UserConfig types. Redirecting the peer to the same
 # vite-plus-core release unifies the types.
 #
-# @cloudflare/vitest-pool-workers@0.22.0 pins its own bundled miniflare/workerd
+# @cloudflare/vitest-plugin@0.22.0 pins its own bundled miniflare/workerd
 # to 5.20260815.0-alpha / 1.20260815.1 — older than the compatibility date
 # apps/api's Worker ships with (cloudflare.config.ts's compatibilityDate). Without
 # these overrides the test harness's bundled runtime can't start a Worker on
@@ -30,41 +32,38 @@ allowBuilds:
 # *test-only* limitation. Forcing the pool onto the newer miniflare/workerd
 # already resolved elsewhere in the tree (via cf and its Vite plugin) lets
 # the Worker's compatibility date stay current. Drop these once
-# @cloudflare/vitest-pool-workers ships a release bundling a newer runtime.
+# @cloudflare/vitest-plugin ships a release bundling a newer runtime.
 overrides:
   oxlint: '=1.83.0'
   oxfmt: '=0.68.0'
   vite@*: npm:@voidzero-dev/vite-plus-core@0.3.3
-  miniflare: 5.20260926.0-alpha
-  workerd: 1.20260926.1
-  '@cloudflare/workerd-darwin-64': 1.20260926.1
-  '@cloudflare/workerd-darwin-arm64': 1.20260926.1
-  '@cloudflare/workerd-linux-64': 1.20260926.1
-  '@cloudflare/workerd-linux-arm64': 1.20260926.1
-  '@cloudflare/workerd-windows-64': 1.20260926.1
+  miniflare: 5.20261101.0-beta
 minimumReleaseAge: 4320
 minimumReleaseAgeExclude:
   # ultracite@7.12.1 is the version pinned in the Task 1 brief (^7.12.1); it was
   # published within the minimumReleaseAge window at install time, so it must be
   # excluded explicitly rather than lowering the global cutoff.
   - ultracite@7.12.1
-  # Worker types and the shared runtime were published within the release-age
-  # window at install time. Keep exceptions scoped to these exact versions.
-  - '@cloudflare/workers-types@5.20260928.1'
-  - workerd@1.20260926.1
-  - '@cloudflare/workerd-darwin-64@1.20260926.1'
-  - '@cloudflare/workerd-darwin-arm64@1.20260926.1'
-  - '@cloudflare/workerd-linux-64@1.20260926.1'
-  - '@cloudflare/workerd-linux-arm64@1.20260926.1'
-  - '@cloudflare/workerd-windows-64@1.20260926.1'
-  - miniflare@5.20260926.0-alpha
-  # cf's launch beta and its exact Cloudflare dependencies are required for migration.
-  - cf@1.0.0-beta.5
-  - '@cloudflare/build-output-utils@0.8.2'
-  - '@cloudflare/codemods@0.2.1'
-  - '@cloudflare/config@0.20.0'
-  - '@cloudflare/runtime-types@0.1.4'
-  # cf requires the v2 Vite plugin beta for its local runtime and build output.
-  - '@cloudflare/vite-plugin@2.0.0-beta.sha-ad79608dd'
-patchedDependencies:
-  miniflare@5.20260926.0-alpha: patches/miniflare@5.20260926.0-alpha.patch
+  # Void 1.5.0 (2026-11-02) and the exact releases it requires; approved by the maintainer on 2026-11-03.
+  - 'void@1.5.0'
+  - '@void/deploy-cloudflare@1.5.0'
+  - '@void/deploy-core@1.5.0'
+  - '@void/edge@1.5.0'
+  - '@void/isr@1.5.0'
+  - '@void/platform@1.5.0'
+  - 'miniflare@5.20261101.0-beta'
+  - 'workerd@1.20261101.1'
+  - '@cloudflare/workerd-darwin-64@1.20261101.1'
+  - '@cloudflare/workerd-darwin-arm64@1.20261101.1'
+  - '@cloudflare/workerd-linux-64@1.20261101.1'
+  - '@cloudflare/workerd-linux-arm64@1.20261101.1'
+  - '@cloudflare/workerd-windows-64@1.20261101.1'
+  - '@cloudflare/vite-plugin@2.0.0-beta.v.9'
+  - '@cloudflare/build-output-utils@0.9.7'
+  - '@cloudflare/codemods@0.7.1'
+  - '@cloudflare/config@0.29.1'
+  - '@cloudflare/runtime-types@0.1.20'
+  - '@cloudflare/workers-auth@0.15.4'
+  - '@cloudflare/workers-types@5.20261102.1'
+  - '@cloudflare/workers-utils@0.50.2'
+  - 'hono@4.13.16'

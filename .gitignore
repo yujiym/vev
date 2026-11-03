@@ -20,3 +20,5 @@ dist/
 # Local verification captures: screenshots and recordings, never committed
 artifacts/
 *.log
+.void/
+.void-wrangler.jsonc

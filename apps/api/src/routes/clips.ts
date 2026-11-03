@@ -171,7 +171,7 @@ export const clipsRoutes = new Hono<{ Bindings: Env }>()
     // mode, §15.3) or momentarily unavailable leaves a registered, un-annotated clip — the exact
     // state `pending` exists to describe — rather than failing a registration that has succeeded.
     try {
-      await enqueueAnnotation(c.env.INGEST, id)
+      await enqueueAnnotation(c.env.VEV_MODE === 'local' ? undefined : c.env.QUEUE_INGEST, id)
     } catch (error) {
       console.error(`clips: could not enqueue annotation for ${id}`, error)
     }

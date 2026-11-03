@@ -5,15 +5,14 @@
   "license": "AGPL-3.0-or-later",
   "type": "module",
   "scripts": {
-    "dev": "pnpm migrate:local && VEV_ASSETS_DIRECTORY=./dev-assets cf dev --mode development",
-    "live": "pnpm migrate:local && cf dev --mode development",
-    "deploy": "cf deploy",
-    "deploy:preview": "GIT_COMMIT=$(git rev-parse --short HEAD) cf workers versions create --mode preview",
+    "prepare": "void prepare",
+    "dev": "void db migrate && vp dev",
+    "build": "vp build",
+    "live": "vp build && void db migrate && vp preview",
+    "deploy": "void deploy",
     "test": "vp test",
     "db:generate": "drizzle-kit generate",
-    "migrate:local": "cf d1 migrations apply 9b91c754-01f5-4399-98a7-bc8b5c9e65e8 --local --persist-to .wrangler/state --dir migrations",
-    "migrate:remote": "cf d1 migrations apply 00000000-0000-0000-0000-000000000000 --dir migrations",
-    "migrate:preview": "cf d1 migrations apply bcee626b-7dbd-4456-8fb9-a708583e6e1d --dir migrations"
+    "migrate:local": "void db migrate"
   },
   "dependencies": {
     "@hono/valibot-validator": "^0.6.1",
@@ -21,15 +20,14 @@
     "@vev/ingest": "workspace:*",
     "@vev/shared": "workspace:*",
     "drizzle-orm": "^0.45.3",
-    "hono": "^4.13.9",
+    "hono": "^4.13.16",
     "valibot": "^1.5.0"
   },
   "devDependencies": {
-    "@cloudflare/vite-plugin": "2.0.0-beta.sha-ad79608dd",
-    "@cloudflare/vitest-pool-workers": "^0.22.0",
-    "@cloudflare/workers-types": "^5.20260928.1",
-    "cf": "1.0.0-beta.5",
+    "@cloudflare/vitest-plugin": "1.4.11",
+    "@cloudflare/workers-types": "^5.20261102.1",
     "drizzle-kit": "^0.31.11",
-    "vitest": "4.1.11"
+    "vitest": "4.1.11",
+    "void": "1.5.0"
   }
 }

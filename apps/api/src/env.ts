@@ -10,6 +10,7 @@ import type { VevMode } from '@vev/shared'
  * instead of a convention.
  */
 export interface Env {
+  ASSETS: Fetcher
   DB: D1Database
   /** Cloudflare Access application audience tag (§13). Not read when VEV_MODE is 'local'. */
   ACCESS_AUD: string
@@ -24,6 +25,6 @@ export interface Env {
   VECTORIZE?: VectorizeIndex
   /** Clip thumbnails and source media (Task 4+). Required — R2 has a local implementation in miniflare. */
   MEDIA: R2Bucket
-  /** Annotation ingest queue (Task 5). Optional like AI/VECTORIZE — a queue is pointless offline (§15.3). */
-  INGEST?: Queue
+  /** Void binds `queues/ingest.ts` here. `enqueueAnnotation` ignores it in local mode (§15.3). */
+  QUEUE_INGEST?: Queue
 }

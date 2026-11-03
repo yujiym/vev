@@ -8,7 +8,6 @@
     "dev": "pnpm --parallel --filter api --filter web run dev",
     "build": "pnpm --filter web run build",
     "live": "pnpm --filter web run build && pnpm --filter api run live",
-    "deploy:preview": "pnpm --filter web run build && pnpm --filter api run deploy:preview",
     "lint": "vp lint",
     "lint:fix": "vp lint --fix",
     "format": "vp fmt",
@@ -28,12 +27,12 @@
   "devEngines": {
     "runtime": {
       "name": "node",
-      "version": "24.18.0",
+      "version": "24.22.2",
       "onFail": "download"
     }
   },
   "engines": {
-    "node": "24.18.0",
+    "node": "24.22.2",
     "pnpm": ">=11.12.0 <12"
   },
   "packageManager": "pnpm@11.20.0"

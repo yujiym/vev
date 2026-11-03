@@ -8,11 +8,11 @@
 # yourself: `bash scripts/smoke-live.sh`.
 #
 # It runs `pnpm live` itself rather than reimplementing its steps (build,
-# migrate, `cf dev`), so a regression in that script fails this check
+# migrate, `vp preview`), so a regression in that script fails this check
 # too instead of only being caught by a script that quietly duplicates it.
 set -euo pipefail
 set -m # `pnpm live` gets its own process group, so the EXIT trap can kill
-       # the whole cf/Vite/workerd tree it spawns, not just the immediate
+       # the whole Void/Vite/workerd tree it spawns, not just the immediate
        # `pnpm` process (portable: works without setsid on Linux and macOS).
 
 root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

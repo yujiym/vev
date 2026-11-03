@@ -110,7 +110,9 @@ const annotateOne = async (env: Env, clipId: string): Promise<void> => {
     .where(eq(clipsTable.id, clipId))
 }
 
-const handleMessage = async (message: Message, env: Env): Promise<void> => {
+type ConsumerMessage = Pick<Message, 'ack' | 'body' | 'retry'>
+
+const handleMessage = async (message: ConsumerMessage, env: Env): Promise<void> => {
   const parsed = v.safeParse(ingestMessageSchema, message.body)
   if (!parsed.success) {
     console.error('ingest: dropping a message that is not an annotation request', message.body)
@@ -129,8 +131,11 @@ const handleMessage = async (message: Message, env: Env): Promise<void> => {
   }
 }
 
-/** The Worker's `queue()` handler (wired in `src/index.ts`). */
-export const ingestQueue = async (batch: MessageBatch, env: Env): Promise<void> => {
+/** The annotation consumer, wired to Void in `queues/ingest.ts`. */
+export const ingestQueue = async (
+  batch: { readonly messages: readonly ConsumerMessage[] },
+  env: Env,
+): Promise<void> => {
   for (const message of batch.messages) {
     // oxlint-disable-next-line eslint/no-await-in-loop -- annotation is one clip at a time (max_batch_size is 1) and each message writes to D1; running a batch concurrently would only add contention
     await handleMessage(message, env)

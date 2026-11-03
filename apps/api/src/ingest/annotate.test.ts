@@ -14,7 +14,7 @@ import { describe, expect, it, vi } from 'vitest'
 import type { Env } from '../env.ts'
 import worker from '../index.ts'
 import { annotateClip } from './annotate.ts'
-import { enqueueAnnotation } from './consume.ts'
+import { enqueueAnnotation, ingestQueue } from './consume.ts'
 import type { AiRunner } from './jev.ts'
 import { askJev, choiceQuestion, noulQuestion, scoreQuestion } from './jev.ts'
 import { TAG_THRESHOLD, TAG_VOCABULARY } from './tags.ts'
@@ -563,7 +563,7 @@ const runQueue = async (body: unknown, ai?: AiRunner): Promise<QueueOutcome> => 
   const ctx = createExecutionContext()
   // SAFETY: the pool's `env` already carries every real binding this Worker uses; this substitutes
   // the one binding that has no local implementation with the fake above.
-  await worker.queue?.(batch, { ...env, AI: ai } as unknown as Env)
+  await ingestQueue(batch, { ...env, AI: ai } as unknown as Env)
   // SAFETY: `getQueueResult`'s declared return type, `FetcherQueueResult`, lives only in
   // `@cloudflare/workers-types/experimental` and so does not resolve against the non-experimental
   // typings this project uses; `QueueOutcome` above restates the two fields this suite reads.
@@ -741,7 +741,7 @@ describe(askJev, () => {
 })
 
 describe('registration enqueues annotation', () => {
-  it('sends the new clip id to INGEST, which is what makes the whole pipeline run', async () => {
+  it('sends the new clip id to QUEUE_INGEST, which is what makes the whole pipeline run', async () => {
     const sent: unknown[] = []
     const queue = { send: async (body: unknown) => await Promise.resolve(sent.push(body)) }
     const ctx = createExecutionContext()
@@ -759,7 +759,7 @@ describe('registration enqueues annotation', () => {
         method: 'POST',
       }),
       // The pool's `env` carries the real bindings; this adds the queue `--env local` has none of.
-      { ...env, INGEST: queue },
+      { ...env, QUEUE_INGEST: queue },
       ctx,
     )
     await waitOnExecutionContext(ctx)
@@ -783,8 +783,8 @@ describe('registration enqueues annotation', () => {
         headers: { 'Cf-Access-Jwt-Assertion': 'zzz-not-a-real-jwt-zzz', 'content-type': 'application/json' },
         method: 'POST',
       }),
-      // As above, with INGEST deliberately absent — local mode (§15.3).
-      { ...env, INGEST: undefined },
+      // As above, with QUEUE_INGEST deliberately absent — local mode (§15.3).
+      { ...env, QUEUE_INGEST: undefined },
       ctx,
     )
     await waitOnExecutionContext(ctx)

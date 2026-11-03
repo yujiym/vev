@@ -60,25 +60,10 @@ const json = async (url, init) => {
  */
 const setAnnotationState = (sql) => {
   try {
-    execFileSync(
-      'pnpm',
-      [
-        'exec',
-        'cf',
-        'd1',
-        'raw',
-        '9b91c754-01f5-4399-98a7-bc8b5c9e65e8',
-        '--persist-to',
-        '.wrangler/state',
-        '--local',
-        '--sql',
-        sql,
-      ],
-      {
-        cwd: API_DIR,
-        stdio: ['ignore', 'ignore', 'pipe'],
-      },
-    )
+    execFileSync('pnpm', ['exec', 'void', 'db', 'execute', sql], {
+      cwd: API_DIR,
+      stdio: ['ignore', 'ignore', 'pipe'],
+    })
   } catch (error) {
     throw new Error(
       `seed: could not write annotation state into the local D1 file. Is \`pnpm live\` running, and has it applied migrations? (${error.message})`,
