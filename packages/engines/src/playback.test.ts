@@ -451,6 +451,27 @@ describe('choosing a clip', () => {
     expect(state.firing).toBeUndefined()
   })
 
+  it('a Hold pressed after a choice made in a fade survives the landing, and the choice still fires', () => {
+    let state = fadingTo('loud')
+    state = reduce(state, { clipId: 'other', kind: 'choose', now: 3000 }, clock)
+    state = reduce(state, { kind: 'hold' }, clock)
+    state = reduce(state, { kind: 'tick', now: 6000 }, clock)
+
+    expect(isHeld(state)).toBe(true)
+    // Hold pauses automatic advance. It does not take back a switch the performer already asked for.
+    expect(state.next).toMatchObject({ clipId: 'other' })
+    expect(state.firing?.at).toBe(8000)
+  })
+
+  it('a choice made after a Hold, in a fade, still releases it at the landing', () => {
+    let state = fadingTo('loud')
+    state = reduce(state, { kind: 'hold' }, clock)
+    state = reduce(state, { clipId: 'other', kind: 'choose', now: 3000 }, clock)
+    state = reduce(state, { kind: 'tick', now: 6000 }, clock)
+
+    expect(isHeld(state)).toBe(false)
+  })
+
   it('Go now over a fade finishes it and arms the held choice', () => {
     let state = fadingTo('loud')
     state = reduce(state, { clipId: 'other', kind: 'choose', now: 3000 }, clock)

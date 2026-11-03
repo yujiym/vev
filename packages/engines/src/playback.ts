@@ -155,11 +155,21 @@ const choose = (state: PlaybackState, clipId: string, now: number, clock: Clock)
   }
 }
 
-/** What a landing does with a choice held through the fade. Choosing the clip that just landed asks for nothing. */
+/**
+ * What a landing does with a choice held through the fade. Choosing the clip that just landed asks
+ * for nothing. The choice already released Hold when it was made, so a Hold on at the landing was
+ * pressed after it: Hold pauses automatic advance and does not take back a switch the performer
+ * asked for, so it stays on while the choice is armed.
+ */
 const armChosen = (state: PlaybackState, now: number, clock: Clock): PlaybackState => {
   const { chosen } = state
   const landed = { ...state, chosen: undefined }
-  return chosen === undefined || chosen === state.current.clipId ? landed : choose(landed, chosen, now, clock)
+  if (chosen === undefined || chosen === state.current.clipId) {
+    return landed
+  }
+
+  const armed = choose(landed, chosen, now, clock)
+  return state.held === true ? { ...armed, held: true } : armed
 }
 
 const fireOrSlip = (state: PlaybackState, now: number, clock: Clock): PlaybackState => {
