@@ -479,6 +479,25 @@ describe('annotateClip — what it refuses', () => {
     }
   })
 
+  it('reads answers from inside a { state, result } wrapper', async () => {
+    const ai: AiRunner = {
+      run: async () =>
+        await Promise.resolve({
+          result: { answers: { wet: { noul: 0.9, type: 'noul' } }, model: 'jev-1.14.0' },
+          state: 'Completed',
+        }),
+    }
+    const answers = await askJev(ai, 'state', { wet: noulQuestion('Wet?', 'yes', 'no') })
+    expect(answers.wet).toMatchObject({ kind: 'noul', probability: 0.9 })
+  })
+
+  it('names the keys of a response it cannot read, without its content', async () => {
+    const ai: AiRunner = { run: async () => await Promise.resolve({ id: 'secret-value', state: 'Queued' }) }
+    const asked = askJev(ai, 'state', { wet: noulQuestion('Wet?', 'yes', 'no') })
+    await expect(asked).rejects.toThrow('keys: id, state')
+    await expect(asked).rejects.not.toThrow('secret-value')
+  })
+
   it('reads answers from the observed envelope and ignores its model and usage siblings', async () => {
     const ai = createFakeAi()
     const result = await annotateClip(ai, CLIP)
