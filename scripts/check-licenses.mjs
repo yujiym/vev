@@ -2,6 +2,9 @@
 // Dependency licence policy (§14.1): only licences compatible with AGPL-3.0.
 // GPL-2.0-only and unknown licences fail. Run: pnpm licenses:check
 import { execFileSync } from 'node:child_process'
+import { existsSync, readFileSync, realpathSync } from 'node:fs'
+import { createRequire } from 'node:module'
+import path from 'node:path'
 
 // This is exactly the project's stated dependency licence policy (§14.1) —
 // not a superset "to be safe". Add an entry only when a real dependency
@@ -89,8 +92,68 @@ const parseLicenseGroups = (json) => {
   return validated
 }
 
+const APP_DIR = path.join(import.meta.dirname, '..', 'apps', 'app')
+
+/**
+ * Dev dependencies whose code is bundled into what the browser receives, so `--prod` never sees them.
+ * `walk` also covers a package's own dependencies. `void` does not: its tree is the server-side CLI
+ * and deploy tooling, and only its own code reaches the client bundle.
+ */
+const SHIPPED_DEV_PACKAGES = [
+  { name: '@void/svelte', walk: true },
+  { name: 'svelte', walk: true },
+  { name: 'void', walk: false },
+]
+
+/**
+ * @param {string} name - the package to find
+ * @param {string} fromDirectory - where to resolve it from
+ * @returns {string} the package's real directory
+ */
+const packageDirectory = (name, fromDirectory) => {
+  const paths = createRequire(path.join(fromDirectory, 'package.json')).resolve.paths(name) ?? []
+  const found = paths.map((root) => path.join(root, name)).find((candidate) => existsSync(candidate))
+  if (found === undefined) {
+    throw new Error(`Could not find ${name} from ${fromDirectory}; the licence check cannot vouch for it.`)
+  }
+  return realpathSync(found)
+}
+
+/**
+ * Adds `name`, and with `walk` its dependency tree, to `groups`.
+ * @param {string} name - the package to audit
+ * @param {string} fromDirectory - where to resolve it from
+ * @param {boolean} walk - whether to follow its dependencies
+ * @param {Record<string, LicensedPackage[]>} groups - the licence groups to extend
+ * @param {Set<string>} seen - package directories already audited
+ */
+const addShipped = (name, fromDirectory, walk, groups, seen) => {
+  const directory = packageDirectory(name, fromDirectory)
+  if (seen.has(directory)) {
+    return
+  }
+  seen.add(directory)
+
+  /** @type {{ dependencies?: Record<string, string>, license?: string, version: string }} */
+  // oxlint-disable-next-line typescript/no-unsafe-assignment -- an installed package's own manifest, read for three fields; a missing licence is reported as unknown below.
+  const manifest = JSON.parse(readFileSync(path.join(directory, 'package.json'), 'utf-8'))
+  const license = manifest.license ?? 'unknown'
+  groups[license] = [...(groups[license] ?? []), { name, versions: [manifest.version] }]
+  if (walk) {
+    for (const dependency of Object.keys(manifest.dependencies ?? {})) {
+      addShipped(dependency, directory, walk, groups, seen)
+    }
+  }
+}
+
 const raw = execFileSync('pnpm', ['licenses', 'list', '--prod', '--json'], { encoding: 'utf-8' })
 const groups = parseLicenseGroups(raw)
+/** @type {Set<string>} */
+const seen = new Set()
+for (const { name, walk } of SHIPPED_DEV_PACKAGES) {
+  addShipped(name, APP_DIR, walk, groups, seen)
+}
+
 const offenders = []
 
 for (const [license, packages] of Object.entries(groups)) {
@@ -110,4 +173,4 @@ if (offenders.length > 0) {
   process.exit(1)
 }
 
-console.log('All production dependency licences are AGPL-3.0 compatible.')
+console.log('All production and browser-shipped dependency licences are AGPL-3.0 compatible.')
