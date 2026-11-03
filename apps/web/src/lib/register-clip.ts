@@ -9,6 +9,8 @@ import * as v from 'valibot'
 import type { Compositor } from './output-client.ts'
 import { dominantColours, readCanvasPixelsSync, recordThumbnail } from './palette.ts'
 import type { SampledFrame } from './palette.ts'
+import { encodeJpeg, snapshotCanvas, stillMoments, stillSize } from './stills.ts'
+import type { StillSize } from './stills.ts'
 
 /**
  * The registration screen's own transient `HydraCompositor` (spec §11.1) is created for the
@@ -131,19 +133,41 @@ const defaultCreateCompositor = async (clock: Clock): Promise<Compositor> => {
   return new HydraCompositor(clock)
 }
 
+/** Encodes every copied frame, dropping any the browser cannot encode rather than failing the capture. */
+const encodeStills = async (
+  frames: readonly HTMLCanvasElement[],
+  encode: (frame: HTMLCanvasElement) => Promise<Blob>,
+): Promise<Blob[]> => {
+  const encoded = await Promise.all(
+    frames.map(async (frame) => {
+      try {
+        return await encode(frame)
+      } catch (error) {
+        console.error('captureThumbnail: could not encode a still frame', error)
+        return null
+      }
+    }),
+  )
+  return encoded.filter((blob) => blob !== null)
+}
+
 /** How many milliseconds into a thumbnail recording the mid-recording palette sample is taken. */
 const midRecordingFraction = (ms: number): number => ms / 2
 
 export interface ThumbnailCapture {
   readonly blob: Blob
   readonly palette: string[]
+  /** JPEG frames spread across the recording, in order. Empty when none could be taken: stills never fail a capture. */
+  readonly stills: Blob[]
 }
 
 export interface CaptureThumbnailDeps {
   readonly createCompositor?: (clock: Clock) => Compositor | Promise<Compositor>
+  readonly encode?: (frame: HTMLCanvasElement) => Promise<Blob>
   readonly now?: () => number
   readonly record?: (canvas: HTMLCanvasElement, ms: number) => Promise<Blob>
   readonly sample?: (canvas: HTMLCanvasElement) => SampledFrame
+  readonly snapshot?: (canvas: HTMLCanvasElement, size: StillSize) => HTMLCanvasElement
 }
 
 /**
@@ -164,6 +188,12 @@ export interface CaptureThumbnailDeps {
  * task landing between two animation frames of an ongoing recording was confirmed, manually, to
  * read back all-zero pixels even while the canvas visibly renders and the recorded WebM itself
  * contains correct frames throughout (see the M2 task 4 report).
+ *
+ * The stills are taken the same way, for the same reason: `snapshot` copies the canvas inside the
+ * tick, at `stillMoments`, onto a small 2D canvas of a size jev accepts. Encoding to JPEG happens
+ * after the recording, from those copies. Any failure in that path drops a frame, never the
+ * thumbnail or the palette — stills are an enhancement to annotation, and registration must not
+ * depend on them.
  */
 export const captureThumbnail = async (
   code: string,
@@ -173,9 +203,11 @@ export const captureThumbnail = async (
 ): Promise<ThumbnailCapture> => {
   const {
     createCompositor = defaultCreateCompositor,
+    encode = encodeJpeg,
     now = Date.now,
     record = recordThumbnail,
     sample = readCanvasPixelsSync,
+    snapshot = snapshotCanvas,
   } = deps
 
   const clock: Clock = { beatsPerBar: 4, bpm: 120, downbeatAt: now() }
@@ -186,12 +218,26 @@ export const captureThumbnail = async (
 
   const midpointMs = midRecordingFraction(ms)
   const startedAt = now()
+  const moments = stillMoments(ms)
+  const size = stillSize(canvas.width, canvas.height)
+  const snapshots: HTMLCanvasElement[] = []
   let midFrame: SampledFrame | undefined
   let frame: number | undefined
   const tick = (): void => {
     compositor.tick(now())
-    if (midFrame === undefined && now() - startedAt >= midpointMs) {
+    const elapsed = now() - startedAt
+    if (midFrame === undefined && elapsed >= midpointMs) {
       midFrame = sample(canvas)
+    }
+    if (size !== undefined && moments.length > 0 && elapsed >= (moments[0] ?? Infinity)) {
+      // A moment is spent whether or not the copy works: retrying a failing copy every frame
+      // would only repeat the failure.
+      moments.shift()
+      try {
+        snapshots.push(snapshot(canvas, size))
+      } catch (error) {
+        console.error('captureThumbnail: could not copy a still frame', error)
+      }
     }
     frame = requestAnimationFrame(tick)
   }
@@ -199,7 +245,11 @@ export const captureThumbnail = async (
 
   try {
     const blob = await record(canvas, ms)
-    return { blob, palette: midFrame === undefined ? [] : dominantColours([midFrame]) }
+    return {
+      blob,
+      palette: midFrame === undefined ? [] : dominantColours([midFrame]),
+      stills: await encodeStills(snapshots, encode),
+    }
   } finally {
     if (frame !== undefined) {
       cancelAnimationFrame(frame)
@@ -285,4 +335,37 @@ export const submitThumbnail = async (
 
   const body: unknown = await response.json()
   return v.parse(thumbnailUploadSchema, body)
+}
+
+/**
+ * Uploads a clip's stills: `POST /api/clips/:id/stills` with one multipart `still` part per JPEG,
+ * in recording order. Uploading is what makes annotation run again with the frames in hand (see
+ * `apps/api/src/routes/stills.ts`).
+ *
+ * Best effort by contract: it resolves to a message saying what went wrong instead of throwing,
+ * because the clip is already registered and stills only improve its annotation. `undefined` means
+ * the stills were stored, or there were none to store.
+ */
+export const submitStills = async (
+  clipId: string,
+  stills: readonly Blob[],
+  fetchImpl: typeof fetch = fetch,
+): Promise<string | undefined> => {
+  if (stills.length === 0) {
+    return undefined
+  }
+  const form = new FormData()
+  for (const [index, still] of stills.entries()) {
+    form.append('still', still, `still-${index}.jpg`)
+  }
+  const endpoint = `${REGISTER_CLIP_ENDPOINT}/${clipId}/stills`
+  try {
+    const response = await fetchImpl(endpoint, { body: form, method: 'POST' })
+    if (!response.ok) {
+      throw await failure(response, `register-clip: POST ${endpoint}`)
+    }
+    return undefined
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error)
+  }
 }
