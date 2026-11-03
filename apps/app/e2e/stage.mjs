@@ -85,8 +85,16 @@ const answer = (ids) => ({
   })),
   suggestedTransition: { bars: 0, kind: 'cut' },
 })
-const offered = [thumbClip.id, clips.get('e2e dark drift').id, clips.get('e2e bright kaleid').id]
+const pool = [
+  thumbClip.id,
+  clips.get('e2e dark drift').id,
+  clips.get('e2e bright kaleid').id,
+  clips.get('e2e annotated and reviewed').id,
+]
 await page.route('**/api/candidates', async (route) => {
+  // As the real route does, never offering what is on screen.
+  const { currentClipId } = route.request().postDataJSON()
+  const offered = pool.filter((id) => id !== currentClipId).slice(0, 3)
   await route.fulfill({ body: JSON.stringify(answer(offered)), contentType: 'application/json' })
 })
 
@@ -137,7 +145,11 @@ check(
 
 // --- a thumbnail shows its first frame, paused, and plays only when looked at ---
 const video = page.locator('.card video')
-check('the clip with a recording shows a video element in its card', (await video.count()) === 1)
+check(
+  'the clip with a recording shows a video element in its card',
+  (await video.count()) === 1,
+  `${await video.count()} videos`,
+)
 const firstFrame = await video.evaluate(async (element) => {
   if (element.readyState < 2) {
     await new Promise((resolve) => element.addEventListener('loadeddata', resolve, { once: true }))
@@ -170,9 +182,28 @@ check('focus plays it too', await until(page, () => !document.querySelector('.ca
 await page.evaluate(() => document.activeElement.blur())
 
 // --- a chosen card, and the cards button ---
+// Early in a bar: screenshots are slow under software rendering, and the switch fires on the next one.
+await showNow(page)
+const earlyInBar = async () =>
+  await until(
+    page,
+    () => Number.parseInt(document.querySelector('.phase div')?.style.width ?? '100', 10) < 15,
+    {
+      timeout: 5000,
+    },
+  )
+await until(page, () => !document.body.textContent.includes('Fade in progress'), { timeout: 15_000 })
+await earlyInBar()
 await page.locator('.card').nth(1).click()
-await shot(page, '32-stage-chosen')
 check('a chosen card has its outline', (await page.locator('.card.chosen').count()) === 1)
+await shot(page, '32-stage-chosen')
+await until(
+  page,
+  () => !document.querySelector('.card.chosen') && !document.body.textContent.includes('Fade in progress'),
+  { timeout: 15_000 },
+)
+await earlyInBar()
+await page.locator('.card').nth(1).click()
 await rowButton(page, 'Cards').click()
 check('the cards button hides them', (await page.locator('.card').count()) === 0)
 check(
@@ -182,7 +213,6 @@ check(
 )
 await rowButton(page, 'Cards').click()
 check('and shows them again', await until(page, () => document.querySelectorAll('.card').length === 3))
-await showNow(page)
 await until(page, () => !document.querySelector('.card.chosen'), { timeout: 15_000 })
 
 // --- a panel over the running show, with panic one click away ---
@@ -302,7 +332,12 @@ await openPanel(page, 'New clip')
 const form = panel(page)
 check('the panel warns that the show shares its GPU', (await form.textContent()).includes('share its GPU'))
 await form.locator('textarea').fill('osc(5).out()')
-await page.keyboard.press('1')
+await page.keyboard.type(' ')
+check(
+  'a key typed in the code field stays in the code field',
+  (await form.locator('textarea').inputValue()) === 'osc(5).out() ',
+)
+await form.locator('textarea').fill('osc(5).out()')
 await page.locator('.card').first().click()
 check(
   'a probe is refused while a switch is armed, and says why',
@@ -321,6 +356,7 @@ await form.getByRole('button', { name: 'Run probe' }).click()
 check(
   'a probe still runs when nothing is in flight',
   await until(page, () => document.body.innerText.includes('Probe passed')),
+  flat(await form.innerText()).slice(0, 500),
 )
 check('the picture still moves after a probe', await moving())
 
@@ -329,7 +365,7 @@ await page.evaluate(() => {
   const real = HTMLCanvasElement.prototype.getContext
   window.__realGetContext = real
   HTMLCanvasElement.prototype.getContext = function getContext(kind, ...rest) {
-    return this.closest('aside') !== null && kind.startsWith('webgl') ? null : real.call(this, kind, ...rest)
+    return this.closest('aside') !== null && kind.includes('webgl') ? null : real.call(this, kind, ...rest)
   }
 })
 await form.locator('textarea').fill('osc(6).out()')
@@ -339,12 +375,7 @@ check(
   await until(page, () =>
     document.querySelector('aside:not([hidden]) [role="alert"]')?.textContent?.includes('Probe failed'),
   ),
-  flat(
-    (await form
-      .locator('[role="alert"]')
-      .textContent()
-      .catch(() => '')) ?? '',
-  ),
+  flat(await form.innerText()).slice(0, 500),
 )
 await page.evaluate(() => {
   HTMLCanvasElement.prototype.getContext = window.__realGetContext

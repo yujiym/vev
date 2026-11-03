@@ -25,7 +25,7 @@
       "ACCESS_TEAM_DOMAIN": "unused-in-local-mode",
       "SOURCE_URL": "https://github.com/yujiym/vev",
       "VEV_MODE": "local",
-      "GIT_COMMIT": "396f287"
+      "GIT_COMMIT": "00f4d51"
     }
   },
   "resolved": {
@@ -53,9 +53,9 @@
       "ACCESS_TEAM_DOMAIN": "unused-in-local-mode",
       "SOURCE_URL": "https://github.com/yujiym/vev",
       "VEV_MODE": "local",
-      "GIT_COMMIT": "396f287"
+      "GIT_COMMIT": "00f4d51"
     },
     "account_id": "4d8de8be5b03d5f77ca1be4e3c0db5b2"
   },
-  "text": "{\n  \"compatibility_date\": \"2026-09-01\",\n  \"compatibility_flags\": [\n    \"nodejs_compat\"\n  ],\n  \"d1_databases\": [\n    {\n      \"binding\": \"DB\",\n      \"database_id\": \"9b91c754-01f5-4399-98a7-bc8b5c9e65e8\",\n      \"database_name\": \"vev\",\n      \"migrations_dir\": \"./db/migrations\"\n    }\n  ],\n  \"name\": \"vev-local\",\n  \"r2_buckets\": [\n    {\n      \"binding\": \"MEDIA\",\n      \"bucket_name\": \"vev-media\"\n    }\n  ],\n  \"vars\": {\n    \"ACCESS_AUD\": \"unused-in-local-mode\",\n    \"ACCESS_TEAM_DOMAIN\": \"unused-in-local-mode\",\n    \"SOURCE_URL\": \"https://github.com/yujiym/vev\",\n    \"VEV_MODE\": \"local\",\n    \"GIT_COMMIT\": \"396f287\"\n  },\n  \"account_id\": \"4d8de8be5b03d5f77ca1be4e3c0db5b2\"\n}\n"
+  "text": "{\n  \"compatibility_date\": \"2026-09-01\",\n  \"compatibility_flags\": [\n    \"nodejs_compat\"\n  ],\n  \"d1_databases\": [\n    {\n      \"binding\": \"DB\",\n      \"database_id\": \"9b91c754-01f5-4399-98a7-bc8b5c9e65e8\",\n      \"database_name\": \"vev\",\n      \"migrations_dir\": \"./db/migrations\"\n    }\n  ],\n  \"name\": \"vev-local\",\n  \"r2_buckets\": [\n    {\n      \"binding\": \"MEDIA\",\n      \"bucket_name\": \"vev-media\"\n    }\n  ],\n  \"vars\": {\n    \"ACCESS_AUD\": \"unused-in-local-mode\",\n    \"ACCESS_TEAM_DOMAIN\": \"unused-in-local-mode\",\n    \"SOURCE_URL\": \"https://github.com/yujiym/vev\",\n    \"VEV_MODE\": \"local\",\n    \"GIT_COMMIT\": \"00f4d51\"\n  },\n  \"account_id\": \"4d8de8be5b03d5f77ca1be4e3c0db5b2\"\n}\n"
 }

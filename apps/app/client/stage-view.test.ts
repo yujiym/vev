@@ -102,6 +102,13 @@ describe(cardBadge, () => {
   })
 })
 
+describe('a card for the clip already on screen', () => {
+  it('says it is playing, rather than ignoring the click', () => {
+    const { view } = rig()
+    expect(cardBadge(view(['a', 'b']), 'a')).toStrictEqual({ eta: 'playing', mark: 'playing' })
+  })
+})
+
 describe(creditLine, () => {
   it('reads as §12.2 lays it out', () => {
     expect(creditLine('Drift', { author: 'Ana', license: 'CC BY 4.0', title: 'Drift' })).toBe(

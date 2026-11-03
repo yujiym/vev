@@ -54,17 +54,21 @@ export const switchEta = (control: ControlSnapshot): string | undefined => {
   return `in ${seconds.toFixed(1)}s`
 }
 
-export type CardMark = 'chosen' | 'default' | 'landing' | 'none'
+export type CardMark = 'chosen' | 'default' | 'landing' | 'none' | 'playing'
 
 /**
  * What a candidate card shows about its clip. `chosen` is the outline: it will switch without
  * anything else being pressed. `default` is what Go would play. `landing` is the clip a fade is
- * bringing in, when a held choice has not taken over.
+ * bringing in, when a held choice has not taken over. `playing` is a stale answer offering the clip
+ * already on screen, which cannot be chosen, so the card says so rather than ignoring the click.
  */
 export const cardMark = (view: LiveView, clipId: string): CardMark => {
   const { control } = view
   if (control.chosenClipId === clipId) {
     return 'chosen'
+  }
+  if (control.current.clipId === clipId) {
+    return 'playing'
   }
   if (control.next?.clipId !== clipId) {
     return 'none'
@@ -85,6 +89,9 @@ export const cardBadge = (view: LiveView, clipId: string): CardBadge => {
   const mark = cardMark(view, clipId)
   if (mark === 'landing') {
     return { eta: 'fading in', mark }
+  }
+  if (mark === 'playing') {
+    return { eta: 'playing', mark }
   }
   return { eta: mark === 'chosen' ? switchEta(view.control) : undefined, mark }
 }

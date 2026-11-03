@@ -17,6 +17,7 @@
       class:chosen={badge.mark === 'chosen'}
       class:default={badge.mark === 'default'}
       class:landing={badge.mark === 'landing'}
+      disabled={badge.mark === 'playing'}
       onblur={() => (looking = undefined)}
       onclick={() => live?.pickCandidate(candidate.clipId)}
       onfocus={() => (looking = candidate.clipId)}
@@ -78,8 +79,13 @@
     width: 9.5rem;
   }
 
-  .card:hover {
+  .card:hover:not(:disabled) {
     background: rgb(26 30 40 / 92%);
+  }
+
+  .card:disabled {
+    cursor: not-allowed;
+    opacity: 0.7;
   }
 
   /* The outline is the one thing that says this clip is about to go live. */
