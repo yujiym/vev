@@ -451,6 +451,63 @@ describe('choosing a clip', () => {
     expect(state.firing).toBeUndefined()
   })
 
+  it('choosing the armed clip again before the bar cancels the choice and leaves the picture alone', () => {
+    let state = reduce(start(), { clipId: 'loud', kind: 'choose', now: 2500 }, clock)
+    state = reduce(state, { kind: 'next-ready' }, clock)
+    state = reduce(state, { clipId: 'loud', kind: 'choose', now: 3000 }, clock)
+
+    expect(state.next).toBeUndefined()
+    expect(state.firing).toBeUndefined()
+    state = reduce(state, { kind: 'tick', now: 4000 }, clock)
+    expect(state.current).toStrictEqual({ clipId: 'quiet', slot: 'a' })
+  })
+
+  it('a cancelled choice can be made again, and arms the next bar afresh', () => {
+    let state = reduce(start(), { clipId: 'loud', kind: 'choose', now: 2500 }, clock)
+    state = reduce(state, { clipId: 'loud', kind: 'choose', now: 2600 }, clock)
+    state = reduce(state, { clipId: 'loud', kind: 'choose', now: 4100 }, clock)
+
+    expect(state.next).toMatchObject({ clipId: 'loud', ready: false })
+    expect(state.firing?.at).toBe(6000)
+  })
+
+  it('choosing a different clip is a replacement, not a cancel', () => {
+    let state = reduce(start(), { clipId: 'loud', kind: 'choose', now: 2500 }, clock)
+    state = reduce(state, { clipId: 'other', kind: 'choose', now: 3000 }, clock)
+
+    expect(state.next?.clipId).toBe('other')
+    expect(state.firing?.at).toBe(4000)
+  })
+
+  it('choosing a staged clip that nothing has armed arms it, as it always did', () => {
+    let state = stagedReady(start(), 'loud')
+    state = reduce(state, { clipId: 'loud', kind: 'choose', now: 2500 }, clock)
+
+    expect(state.firing?.at).toBe(4000)
+    expect(state.next?.clipId).toBe('loud')
+  })
+
+  it('cancelling leaves Hold as the performer last set it', () => {
+    let state = reduce(start(), { clipId: 'loud', kind: 'choose', now: 2500 }, clock)
+    state = reduce(state, { kind: 'hold' }, clock)
+    state = reduce(state, { clipId: 'loud', kind: 'choose', now: 3000 }, clock)
+
+    expect(isHeld(state)).toBe(true)
+  })
+
+  it('choosing the same clip twice during a fade drops the held choice, and nothing is armed at the landing', () => {
+    let state = fadingTo('loud')
+    state = reduce(state, { clipId: 'other', kind: 'choose', now: 3000 }, clock)
+    state = reduce(state, { clipId: 'other', kind: 'choose', now: 3500 }, clock)
+
+    expect(state.chosen).toBeUndefined()
+    expect(state.fading).toBeDefined()
+    state = reduce(state, { kind: 'tick', now: 6000 }, clock)
+    expect(state.current.clipId).toBe('loud')
+    expect(state.next).toBeUndefined()
+    expect(state.firing).toBeUndefined()
+  })
+
   it('a Hold pressed after a choice made in a fade survives the landing, and the choice still fires', () => {
     let state = fadingTo('loud')
     state = reduce(state, { clipId: 'other', kind: 'choose', now: 3000 }, clock)

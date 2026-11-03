@@ -890,6 +890,8 @@ export const createLive = (options: CreateLiveOptions): Live => {
       syncing = false
     }
     dropEndedPick(control.getSnapshot())
+    // A choice taken back leaves nothing staged: Next falls back to the track's own step, or the first candidate.
+    syncNext({ performer: false })
     notify()
   }
 

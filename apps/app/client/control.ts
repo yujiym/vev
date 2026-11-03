@@ -424,6 +424,14 @@ export const createControl = (picture: Picture, options: CreateControlOptions = 
     }
   }
 
+  /** Undoes `markOverride` once nothing is staged: the next tick stages the track's own step again. */
+  const releaseOverride = (): void => {
+    if (run !== undefined) {
+      run.queued = run.index
+      run.pending = 'none'
+    }
+  }
+
   /**
    * Moves the track cursor when a switch lands, by what the reducer did rather than by comparing
    * clip ids: a track may name the same clip twice in a row. Measured from the bar the switch fired
@@ -497,10 +505,14 @@ export const createControl = (picture: Picture, options: CreateControlOptions = 
       return
     }
 
+    const before = state
     dispatch({ clipId, kind: 'choose', now: now() })
     // During a fade the choice is only held; `followTrack` marks it when it lands.
     if (!state.fading && state.next !== undefined) {
       markOverride()
+    } else if (before.firing !== undefined && state.firing === undefined && state.next === undefined) {
+      // The choice was taken back, and with it the override it made: the track's own step is next again.
+      releaseOverride()
     }
     notify()
   }

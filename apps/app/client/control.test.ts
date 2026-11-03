@@ -1267,6 +1267,38 @@ describe('transport controls', () => {
     })
   })
 
+  it('taking a choice back puts the track’s own next item back, and the track carries on', () => {
+    const clockNow = createFakeNow(0)
+    const { control, messages } = trackControl(clockNow)
+    control.loadTrack(cutTrack(4))
+    clockNow.set(500)
+    control.go()
+    clockNow.set(2000)
+    control.tick()
+    expect(control.getSnapshot()).toMatchObject({ current: { clipId: 'one' }, next: { clipId: 'two' } })
+
+    clockNow.set(2500)
+    control.choose('three')
+    expect(control.getSnapshot()).toMatchObject({ armed: true, next: { clipId: 'three' } })
+    control.choose('three')
+    control.tick()
+
+    expect(control.getSnapshot()).toMatchObject({
+      armed: false,
+      current: { clipId: 'one' },
+      next: { clipId: 'two' },
+      track: { index: 0, queued: 1 },
+    })
+    expect(switches(messages).filter((call) => call.at >= 2500)).toStrictEqual([])
+
+    // Item one landed on the bar at 2000 and holds four bars: Go arms at 8000 and the switch is on 10000.
+    clockNow.set(8000)
+    control.tick()
+    clockNow.set(10_000)
+    control.tick()
+    expect(control.getSnapshot().current.clipId).toBe('two')
+  })
+
   it('a Hold pressed while a switch is armed survives the landing', () => {
     const clockNow = createFakeNow(0)
     const { control } = trackControl(clockNow)

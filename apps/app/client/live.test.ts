@@ -419,6 +419,34 @@ describe(createLive, () => {
     expect(live.getSnapshot().live.pickedClipId).toBe('b')
   })
 
+  it('clicking the outlined card again takes the choice back, and Next is the first candidate again', async () => {
+    const { control, live } = setup()
+    await vi.waitFor(() => {
+      expect(live.getSnapshot().live.candidates).toHaveLength(2)
+    })
+
+    live.pickCandidate('d')
+    live.pickCandidate('d')
+
+    expect(control.getSnapshot()).toMatchObject({ armed: false, next: { clipId: 'b' } })
+    expect(live.getSnapshot().live).toMatchObject({ next: { clipId: 'b', source: 'candidate' } })
+    expect(live.getSnapshot().live.pickedClipId).toBeUndefined()
+  })
+
+  it('pressing the same number key twice takes the choice back', async () => {
+    const { control, live } = setup()
+    await vi.waitFor(() => {
+      expect(live.getSnapshot().live.candidates).toHaveLength(2)
+    })
+
+    expect(live.key({ key: '2' }, { panelOpen: false })).toBe(true)
+    expect(control.getSnapshot().armed).toBe(true)
+    expect(live.key({ key: '2' }, { panelOpen: false })).toBe(true)
+
+    expect(control.getSnapshot().armed).toBe(false)
+    expect(live.getSnapshot().live.pickedClipId).toBeUndefined()
+  })
+
   it('the 1/2/3 keys arm the card they name', async () => {
     const { control, live } = setup()
     await vi.waitFor(() => {
@@ -599,6 +627,26 @@ describe('createLive with a track and an armed switch', () => {
     advance(501)
     expect(control.getSnapshot().current.clipId).toBe('y')
     expect(control.getSnapshot().track).toMatchObject({ index: 0 })
+  })
+
+  it('taking a choice back puts the track’s next item back as Next', async () => {
+    const { control, live } = setup(() => response(['x', 'y', 'z']))
+    await vi.waitFor(() => {
+      expect(live.getSnapshot().live.load).toBe('ok')
+    })
+    control.loadTrack({ clips: [], id: 'track-1', steps: trackOf(['one', 'two']).steps, title: 'Set' })
+    live.setTrack(trackOf(['one', 'two']))
+    await vi.waitFor(() => {
+      expect(live.getSnapshot().live.candidates).toHaveLength(3)
+    })
+
+    live.pickCandidate('y')
+    expect(control.getSnapshot().next?.clipId).toBe('y')
+    live.pickCandidate('y')
+
+    expect(control.getSnapshot()).toMatchObject({ armed: false, next: { clipId: 'one' } })
+    expect(live.getSnapshot().live.next).toMatchObject({ clipId: 'one', source: 'track' })
+    expect(live.getSnapshot().live.pickedClipId).toBeUndefined()
   })
 
   it('falls back to candidate #1 once the track has no next item, without moving the track cursor', async () => {

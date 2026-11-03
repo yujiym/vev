@@ -141,10 +141,19 @@ const staged = (state: PlaybackState, clipId: string): Staged =>
  * The performer's choice, in one rule per state. Armed already: the new clip takes the same bar.
  * Mid-fade: there is no free slot to stage into, so it waits for the landing rather than being lost.
  * Choosing is an explicit advance, so it releases Hold as Go does.
+ *
+ * Choosing the clip that is already armed, or already held through the fade, takes the choice back:
+ * nothing switches, and the picture carries on. That is a second press on the same card or key, and
+ * `held` stays as the performer last left it, because nothing here is an advance.
  */
 const choose = (state: PlaybackState, clipId: string, now: number, clock: Clock): PlaybackState => {
   if (state.fading) {
-    return { ...state, chosen: clipId, held: false }
+    return state.chosen === clipId
+      ? { ...state, chosen: undefined }
+      : { ...state, chosen: clipId, held: false }
+  }
+  if (state.firing !== undefined && state.next?.clipId === clipId) {
+    return { ...state, firing: undefined, next: undefined }
   }
 
   return {
