@@ -1,0 +1,903 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+import { chooseTransition, interpretDirection } from '@vev/decision'
+import { candidateResponseSchema } from '@vev/shared'
+import type {
+  AnnotationStatus,
+  CandidateRequest,
+  CandidateResponse,
+  CandidateResult,
+  Clip,
+  ClipEnergy,
+  ClipSummary,
+  Direction,
+  EngineKind,
+  TransitionKind,
+  TransitionSpec,
+} from '@vev/shared'
+import * as v from 'valibot'
+
+import type { Control, ControlSnapshot, PlayableClip, TrackStep } from './control.ts'
+import { fetchClip, fetchLibrary, thumbnailUrl } from './library.ts'
+
+/**
+ * The live screen's data. Everything the performer is offered, what it was offered for, and what
+ * happens when they pick it. Kept out of `.svelte` because templates are outside the type and lint
+ * gate (ADR 0001), and because the candidate request has a lifecycle — ignore an answer that
+ * belongs to a superseded question, keep the last answer when a new one fails — that is exactly
+ * the kind of rule a template must not own.
+ */
+
+const DEFAULT_TRANSITION: TransitionSpec = { bars: 2, kind: 'crossfade' }
+
+/** How many recent transitions the variety rule reads (spec §9.2: three in a row). */
+const RECENT_LIMIT = 6
+
+/** How many of the library's best clips the route may put in front of its model (`limit`, §8.1). */
+const CANDIDATE_LIMIT = 20
+
+/** How many clips are sent as history; spec §8.2's state lists the last five. */
+const HISTORY_LIMIT = 5
+
+export type CandidateLoad = 'idle' | 'loading' | 'ok' | 'stale'
+
+/** What the screen knows about a clip beyond the candidate result itself. */
+export interface ClipMeta {
+  annotationStatus?: AnnotationStatus | undefined
+  energy?: ClipEnergy | undefined
+  engine?: EngineKind | undefined
+  reviewed?: boolean | undefined
+  thumbnailKey?: string | undefined
+  title: string
+  usesFeedback?: boolean | undefined
+}
+
+export interface CandidateView extends CandidateResult {
+  annotationStatus: AnnotationStatus | undefined
+  clipId: string
+  energy: ClipEnergy | undefined
+  engine: EngineKind | undefined
+  reviewed: boolean | undefined
+  thumbnailKey: string | undefined
+  thumbnailUrl: string | undefined
+  title: string
+  usesFeedback: boolean | undefined
+}
+
+export interface LiveState {
+  candidates: readonly CandidateView[]
+  direction?: Direction
+  error?: string
+  /** Most recent last, as spec §8.2's history lists it. */
+  historyIds: readonly string[]
+  load: CandidateLoad
+  /** The clip the last request was about. Distinguishes a stale answer from a current one. */
+  requestedFor?: string
+  /** Monotonic: a response carrying any other id is an answer to a question nobody is asking now. */
+  requestId: number
+  /** The candidate the performer picked for the next switch, if any (spec §7, §12.1). */
+  pickedClipId?: string
+  suggestedTransition?: TransitionSpec
+  /** The performer's explicit transition choice for this switch. */
+  transition?: TransitionSpec
+  transitionPicked: boolean
+  recentTransitions: readonly TransitionKind[]
+}
+
+export const initialLive = (): LiveState => ({
+  candidates: [],
+  historyIds: [],
+  load: 'idle',
+  recentTransitions: [],
+  requestId: 0,
+  transitionPicked: false,
+})
+
+/** A new question is about to be asked. The id moves immediately, so any older answer is stale. */
+export const beginRequest = (state: LiveState, clipId: string): LiveState => ({
+  ...state,
+  error: undefined,
+  load: 'loading',
+  requestId: state.requestId + 1,
+  requestedFor: clipId,
+})
+
+/** The answer to the current question, with each candidate joined to what the library knows. */
+export const applyCandidates = (
+  state: LiveState,
+  requestId: number,
+  response: CandidateResponse,
+  clips: ReadonlyMap<string, ClipMeta>,
+): LiveState => {
+  if (requestId !== state.requestId) {
+    return state
+  }
+
+  const candidates: CandidateView[] = response.candidates.map((candidate) => {
+    const meta = clips.get(candidate.clipId)
+    return {
+      ...candidate,
+      annotationStatus: meta?.annotationStatus,
+      clipId: candidate.clipId,
+      energy: meta?.energy,
+      engine: meta?.engine,
+      reviewed: meta?.reviewed,
+      thumbnailKey: meta?.thumbnailKey,
+      thumbnailUrl: meta === undefined ? undefined : thumbnailUrl(meta),
+      title: meta?.title ?? candidate.clipId,
+      usesFeedback: meta?.usesFeedback,
+    }
+  })
+
+  const answered: LiveState = {
+    ...state,
+    candidates,
+    error: undefined,
+    load: 'ok',
+    suggestedTransition: response.suggestedTransition,
+  }
+  const stillOffered =
+    state.pickedClipId === undefined ||
+    candidates.some((candidate) => candidate.clipId === state.pickedClipId)
+  if (stillOffered) {
+    return answered
+  }
+
+  // The pick belongs to the old answer; a transition chosen for it goes with it.
+  return { ...answered, pickedClipId: undefined, transition: undefined, transitionPicked: false }
+}
+
+/**
+ * A failed request keeps the last candidates and marks them stale (spec §0 principle 2). Returning
+ * to an empty screen because the network blinked would be the show stopping; the performer keeps
+ * a usable Next, labelled as old, and playback never notices.
+ */
+export const failRequest = (state: LiveState, requestId: number, error: string): LiveState => {
+  if (requestId !== state.requestId) {
+    return state
+  }
+
+  return { ...state, error, load: 'stale' }
+}
+
+/** Records the clip that just stopped being current. */
+export const pushHistory = (state: LiveState, clipId: string): LiveState => ({
+  ...state,
+  historyIds: [...state.historyIds, clipId].slice(-20),
+})
+
+/** The performer's pick wins over the track's own next item (spec §7). */
+export const pickCandidate = (state: LiveState, clipId: string): LiveState => ({
+  ...state,
+  pickedClipId: clipId,
+  transition: undefined,
+  transitionPicked: false,
+})
+
+/** The performer's one-click transition choice, which outranks every automatic rule (spec §9.2). */
+export const chooseTransitionManually = (state: LiveState, transition: TransitionSpec): LiveState => ({
+  ...state,
+  transition,
+  transitionPicked: true,
+})
+
+export interface LiveNext {
+  candidateIndex?: number
+  clipId: string
+  source: 'candidate' | 'track'
+  title?: string
+  transition: TransitionSpec
+  transitionFrom: 'locked' | 'performer' | 'rules' | 'suggested' | 'track'
+}
+
+export interface TrackNext {
+  clipId: string
+  energy?: ClipEnergy
+  engine: EngineKind
+  /** The track item's transition (spec §5 `TrackItem.transitionIn`). */
+  locked: boolean
+  transition: TransitionSpec
+}
+
+export interface NextInput {
+  current?: ClipMeta
+  currentClipId: string
+  defaultTransition: TransitionSpec
+  lookup: (clipId: string) => ClipMeta | undefined
+  nextSection?: string
+  recentTransitions: readonly TransitionKind[]
+  trackNext?: TrackNext
+}
+
+/**
+ * What plays next, and the transition that brings it in.
+ *
+ * The order is spec §7 and §9.2 together: the performer's pick, then the track's own next item,
+ * then candidate #1. The transition is the performer's explicit choice, then the track item's
+ * (locked items are never re-chosen), then the decision response's suggestion for candidate #1,
+ * and finally the rules — which is why a candidate the response did not rank first, and a picked
+ * Next, still get a considered transition.
+ */
+const pickedNext = (state: LiveState, input: NextInput): LiveNext | undefined => {
+  const index = state.candidates.findIndex(
+    (candidate) => candidate.clipId === state.pickedClipId && candidate.clipId !== input.currentClipId,
+  )
+  const picked = state.candidates[index]
+  if (picked === undefined) {
+    return undefined
+  }
+  return {
+    candidateIndex: index,
+    clipId: picked.clipId,
+    source: 'candidate',
+    title: picked.title,
+    transition: input.defaultTransition,
+    transitionFrom: 'rules',
+  }
+}
+
+const trackItemNext = (input: NextInput): LiveNext | undefined => {
+  const { trackNext } = input
+  if (trackNext === undefined) {
+    return undefined
+  }
+  return {
+    clipId: trackNext.clipId,
+    source: 'track',
+    title: input.lookup(trackNext.clipId)?.title,
+    transition: trackNext.transition,
+    transitionFrom: trackNext.locked ? 'locked' : 'track',
+  }
+}
+
+/** Candidate #1 — or the first one that is not already on screen, so a stale answer cannot loop a clip. */
+const leadingCandidateNext = (state: LiveState, input: NextInput): LiveNext | undefined => {
+  const index = state.candidates.findIndex((candidate) => candidate.clipId !== input.currentClipId)
+  const leading = state.candidates[index]
+  if (leading === undefined) {
+    return undefined
+  }
+  return {
+    candidateIndex: index,
+    clipId: leading.clipId,
+    source: 'candidate',
+    title: leading.title,
+    transition: input.defaultTransition,
+    transitionFrom: 'rules',
+  }
+}
+
+/** The transition for a candidate: the response's suggestion for #1, the rules for any other. */
+const automaticTransition = (state: LiveState, input: NextInput, selected: LiveNext): LiveNext => {
+  if (selected.candidateIndex === 0 && state.suggestedTransition !== undefined) {
+    return { ...selected, transition: state.suggestedTransition, transitionFrom: 'suggested' }
+  }
+
+  const nextMeta = input.lookup(selected.clipId)
+  const engine = nextMeta?.engine ?? input.current?.engine ?? 'hydra'
+  const transition = chooseTransition({
+    current: { energy: input.current?.energy, engine: input.current?.engine ?? engine },
+    defaultTransition: input.defaultTransition,
+    next: {
+      energy: nextMeta?.energy,
+      engine,
+      usesFeedback: nextMeta?.usesFeedback ?? false,
+    },
+    nextSection: input.nextSection,
+    recent: input.recentTransitions.slice(-3),
+  })
+
+  return { ...selected, transition, transitionFrom: 'rules' }
+}
+
+export const selectNext = (state: LiveState, input: NextInput): LiveNext | undefined => {
+  const selected = pickedNext(state, input) ?? trackItemNext(input) ?? leadingCandidateNext(state, input)
+  if (selected === undefined) {
+    return undefined
+  }
+
+  if (state.transitionPicked && state.transition !== undefined) {
+    return { ...selected, transition: state.transition, transitionFrom: 'performer' }
+  }
+
+  return selected.source === 'track' ? selected : automaticTransition(state, input, selected)
+}
+
+/** The one-click change: cut → 1-bar fade → 2-bar fade → 4-bar fade → cut. */
+export const nextTransitionChoice = (transition: TransitionSpec): TransitionSpec => {
+  if (transition.kind === 'cut') {
+    return { bars: 1, kind: 'crossfade' }
+  }
+  if (transition.bars <= 1) {
+    return { bars: 2, kind: 'crossfade' }
+  }
+  if (transition.bars <= 2) {
+    return { bars: 4, kind: 'crossfade' }
+  }
+  return { bars: 0, kind: 'cut' }
+}
+
+/** What the NEXT panel calls a transition. */
+export const transitionLabel = (transition: TransitionSpec): string =>
+  transition.kind === 'cut' ? 'Cut' : `Crossfade ${transition.bars} ${transition.bars === 1 ? 'bar' : 'bars'}`
+
+export type DecisionTone = 'decision' | 'fallback' | 'idle' | 'loading' | 'stale'
+
+export interface DecisionStatus {
+  label: string
+  providerId?: string | undefined
+  tone: DecisionTone
+}
+
+/** The top bar's decision dot: which layer produced the candidates, and whether they are current. */
+export const decisionStatus = (state: LiveState): DecisionStatus => {
+  if (state.load === 'stale') {
+    return { label: 'stale — keeping the last candidates', tone: 'stale' }
+  }
+  if (state.load === 'loading') {
+    return { label: 'asking…', tone: 'loading' }
+  }
+  if (state.load === 'idle') {
+    return { label: 'waiting for a clip', tone: 'idle' }
+  }
+
+  const [top] = state.candidates
+  if (top === undefined) {
+    return { label: 'no candidates', tone: 'fallback' }
+  }
+  if (top.source === 'decision') {
+    return { label: top.providerId ?? 'decision provider', providerId: top.providerId, tone: 'decision' }
+  }
+  return { label: 'rule ranking', tone: 'fallback' }
+}
+
+export type LiveKeyAction =
+  | { kind: 'blackout' }
+  | { kind: 'chat' }
+  | { kind: 'close-chat' }
+  | { index: 0 | 1 | 2; kind: 'select-candidate' }
+  | { kind: 'freeze' }
+  | { kind: 'go' }
+  | { kind: 'go-now' }
+  | { kind: 'hold' }
+
+export interface KeyEventLike {
+  altKey?: boolean
+  ctrlKey?: boolean
+  key: string
+  metaKey?: boolean
+  shiftKey?: boolean
+}
+
+const TEXT_INPUT_TAGS = new Set(['INPUT', 'SELECT', 'TEXTAREA'])
+
+/** The parts of a DOM element the key map reads; the page hands over `event.target` when it is one. */
+export interface KeyTarget {
+  isContentEditable?: boolean
+  tagName?: string
+}
+
+/** True when a keystroke belongs to a field rather than to the transport (spec §12.1). */
+export const isTextEntry = (target: KeyTarget | undefined): boolean =>
+  target !== undefined &&
+  (target.isContentEditable === true ||
+    (target.tagName !== undefined && TEXT_INPUT_TAGS.has(target.tagName.toUpperCase())))
+
+/**
+ * Spec §12.1's key map, as data rather than a chain in the template.
+ *
+ * While the chat has focus every single-key shortcut is suspended, because those keys are the
+ * performer's sentence, not the transport. `Esc` is the exception: it closes the panel rather than
+ * freezing the output, which is the one place the same key means two things.
+ */
+export const keyAction = (
+  event: KeyEventLike,
+  options: { chatFocused: boolean; textEntry: boolean },
+): LiveKeyAction | undefined => {
+  if (options.chatFocused) {
+    return event.key === 'Escape' ? { kind: 'close-chat' } : undefined
+  }
+  if (options.textEntry || event.ctrlKey === true || event.metaKey === true || event.altKey === true) {
+    return undefined
+  }
+
+  switch (event.key) {
+    case ' ':
+    case 'Spacebar': {
+      return event.shiftKey === true ? { kind: 'go-now' } : { kind: 'go' }
+    }
+    case '1': {
+      return { index: 0, kind: 'select-candidate' }
+    }
+    case '2': {
+      return { index: 1, kind: 'select-candidate' }
+    }
+    case '3': {
+      return { index: 2, kind: 'select-candidate' }
+    }
+    case 'b':
+    case 'B': {
+      return { kind: 'blackout' }
+    }
+    case 'c':
+    case 'C': {
+      return { kind: 'chat' }
+    }
+    case 'Escape': {
+      return { kind: 'freeze' }
+    }
+    case 'h':
+    case 'H': {
+      return { kind: 'hold' }
+    }
+    default: {
+      return undefined
+    }
+  }
+}
+
+/** A track as the live screen needs it: id and mode for the request, steps for the timeline and sections. */
+export interface LiveTrack {
+  defaultTransition: TransitionSpec
+  id: string
+  mode: 'commercial' | 'noncommercial'
+  steps: readonly TrackStep[]
+  title: string
+}
+
+export interface LiveSnapshot {
+  candidates: readonly CandidateView[]
+  current: ClipMeta | undefined
+  decision: DecisionStatus
+  direction: Direction | undefined
+  error: string | undefined
+  historyIds: readonly string[]
+  load: CandidateLoad
+  next: LiveNext | undefined
+  pickedClipId: string | undefined
+  recentTransitions: readonly TransitionKind[]
+  suggestedTransition: TransitionSpec | undefined
+  track: LiveTrack | undefined
+  transitionPicked: boolean
+}
+
+/** One subscription gives the page everything it renders: transport state and the candidate state. */
+export interface LiveView {
+  control: ControlSnapshot
+  live: LiveSnapshot
+}
+
+export interface CreateLiveOptions {
+  control: Control
+  fetchCandidates?: (body: CandidateRequest) => Promise<CandidateResponse>
+  fetchClipById?: (id: string) => Promise<Clip>
+  fetchLibrarySummaries?: () => Promise<readonly ClipSummary[]>
+  /** Wall-clock now, per spec: `Date.now()`. */
+  now?: () => number
+  onChat?: () => void
+  onCloseChat?: () => void
+}
+
+export interface Live {
+  /** Applies the performer's one-click transition choice to this switch. */
+  chooseTransition: (transition: TransitionSpec) => void
+  /** Clears the standing direction and asks again (spec §8.6). */
+  clearDirection: () => void
+  getSnapshot: () => LiveView
+  /** Turns a sentence into a standing direction and asks for new candidates. Never moves the show. */
+  interpret: (text: string) => void
+  /** Handles one key event; returns true when it consumed the key. */
+  key: (event: KeyEventLike & { target?: KeyTarget }, options: { chatFocused: boolean }) => boolean
+  /** The performer's candidate choice, which replaces Next. */
+  pickCandidate: (clipId: string) => void
+  /** The track the control window is playing, or `undefined` once it leaves one. */
+  setTrack: (track: LiveTrack | undefined) => void
+  stop: () => void
+  subscribe: (listener: (view: LiveView) => void) => () => void
+}
+
+const defaultFetchCandidates = async (body: CandidateRequest): Promise<CandidateResponse> => {
+  const response = await fetch('/api/candidates', {
+    body: JSON.stringify(body),
+    headers: { 'content-type': 'application/json' },
+    method: 'POST',
+  })
+  if (!response.ok) {
+    const detail = await response.text().catch(() => '')
+    throw new Error(detail === '' ? `POST /api/candidates failed with ${response.status}` : detail)
+  }
+
+  return v.parse(candidateResponseSchema, await response.json())
+}
+
+const toPlayable = (clip: Clip): PlayableClip => ({ code: clip.code, id: clip.id, title: clip.title })
+
+/**
+ * Wires the candidate pipeline to the control window.
+ *
+ * One request goes out when the screen opens and after every landing (spec §8.3: "right after A
+ * starts"), and immediately when the direction changes. A landing also moves the old clip into
+ * history and consumes the transition that brought it in, which is what the variety rule reads.
+ * Nothing here ever calls `go`; the chat and the candidate list steer, the performer switches.
+ */
+export const createLive = (options: CreateLiveOptions): Live => {
+  const {
+    control,
+    fetchCandidates = defaultFetchCandidates,
+    fetchClipById = fetchClip,
+    fetchLibrarySummaries = fetchLibrary,
+    now = Date.now,
+    onChat = () => {
+      // No chat surface attached — the key is still consumed elsewhere.
+    },
+    onCloseChat = () => {
+      // Same.
+    },
+  } = options
+
+  let live = initialLive()
+  let controlSnapshot = control.getSnapshot()
+  let track: LiveTrack | undefined
+  let lastCurrent: string | undefined
+  let stagedTransition: TransitionSpec | undefined
+  let stopped = false
+  let syncing = false
+  let requestedOnce = false
+  let libraryRequest: Promise<void> | undefined
+
+  const summaries = new Map<string, ClipMeta>()
+  const clips = new Map<string, Clip>()
+  const listeners = new Set<(view: LiveView) => void>()
+
+  const lookup = (clipId: string): ClipMeta | undefined => clips.get(clipId) ?? summaries.get(clipId)
+
+  const ensureLibrary = async (): Promise<void> => {
+    if (libraryRequest !== undefined) {
+      await libraryRequest
+      return
+    }
+    libraryRequest = (async () => {
+      try {
+        const list = await fetchLibrarySummaries()
+        for (const summary of list) {
+          summaries.set(summary.id, summary)
+        }
+      } catch (error) {
+        // Candidate requests can still work with no summaries; the full-clip fetch fills the
+        // titles in. Retry on the next request rather than caching a failure for the whole show.
+        libraryRequest = undefined
+        console.error('vev: could not load the clip library for candidate labels', error)
+      }
+    })()
+    await libraryRequest
+  }
+
+  const fetchOrNull = async (id: string): Promise<Clip | null> => {
+    try {
+      return await fetchClipById(id)
+    } catch (error) {
+      console.error(`vev: could not fetch candidate clip ${id}; it cannot be staged`, error)
+      return null
+    }
+  }
+
+  const ensureClips = async (ids: readonly string[]): Promise<void> => {
+    const missing = [...new Set(ids)].filter((id) => !clips.has(id))
+    const fetched = await Promise.all(missing.map(fetchOrNull))
+
+    const playable: PlayableClip[] = []
+    for (const clip of fetched) {
+      if (clip !== null) {
+        clips.set(clip.id, clip)
+        playable.push(toPlayable(clip))
+      }
+    }
+    if (playable.length > 0) {
+      control.addClips(playable)
+    }
+  }
+
+  const trackNextFor = (): TrackNext | undefined => {
+    if (track === undefined || controlSnapshot.track === undefined) {
+      return undefined
+    }
+    const index = controlSnapshot.track.index < 0 ? 0 : controlSnapshot.track.index + 1
+    const step = track.steps[index]
+    if (step === undefined) {
+      return undefined
+    }
+
+    const meta = lookup(step.clipId)
+    return {
+      clipId: step.clipId,
+      energy: meta?.energy,
+      engine: meta?.engine ?? 'hydra',
+      // `TrackItem.transitionLocked` has no column yet (spec §17); an item's transition is
+      // automatic until one exists, so nothing is reported locked here.
+      locked: false,
+      transition: step.transition,
+    }
+  }
+
+  const contextFor = () => {
+    const index = controlSnapshot.track?.index ?? -1
+    const step = track?.steps[Math.max(index, 0)]
+    const next = track?.steps[index < 0 ? 0 : index + 1]
+    return {
+      defaultTransition: track?.defaultTransition ?? DEFAULT_TRANSITION,
+      nextSection: next?.section,
+      section: index < 0 ? undefined : step?.section,
+    }
+  }
+
+  const desiredNext = (): LiveNext | undefined => {
+    const context = contextFor()
+    return selectNext(live, {
+      current: lookup(controlSnapshot.current.clipId),
+      currentClipId: controlSnapshot.current.clipId,
+      defaultTransition: context.defaultTransition,
+      lookup,
+      nextSection: context.nextSection,
+      recentTransitions: live.recentTransitions,
+      trackNext: trackNextFor(),
+    })
+  }
+
+  /**
+   * Brings the control window's staged Next and transition in line with what the screen shows.
+   *
+   * Once a switch is armed it is committed: an answer that merely arrived late, or a track step
+   * that came due, must not swap the clip that is about to go live. The performer's own pick or
+   * transition change is the one thing allowed through, because that is a deliberate act.
+   */
+  const syncNext = ({ performer }: { performer: boolean }): void => {
+    if (syncing) {
+      return
+    }
+
+    const desired = desiredNext()
+    if (desired === undefined) {
+      return
+    }
+
+    const current = control.getSnapshot()
+    if (current.armed && !performer) {
+      return
+    }
+
+    syncing = true
+    try {
+      const { transition } = desired
+      const sameClip = current.next?.clipId === desired.clipId
+      const sameTransition =
+        current.transition.kind === transition.kind && current.transition.bars === transition.bars
+
+      if (!sameTransition) {
+        control.setTransition(transition)
+      }
+      if (!sameClip) {
+        control.overrideNext(desired.clipId)
+      }
+      // What the control window accepted, not what was asked: both are refused mid-fade, and the
+      // variety rule must read the transition that actually ran.
+      stagedTransition = control.getSnapshot().transition
+    } finally {
+      syncing = false
+    }
+  }
+
+  const snapshot = (): LiveView => ({
+    control: controlSnapshot,
+    live: {
+      candidates: live.candidates,
+      current: lookup(controlSnapshot.current.clipId),
+      decision: decisionStatus(live),
+      direction: live.direction,
+      error: live.error,
+      historyIds: live.historyIds,
+      load: live.load,
+      next: desiredNext(),
+      pickedClipId: live.pickedClipId,
+      recentTransitions: live.recentTransitions,
+      suggestedTransition: live.suggestedTransition,
+      track,
+      transitionPicked: live.transitionPicked,
+    },
+  })
+
+  const notify = (): void => {
+    const view = snapshot()
+    for (const listener of listeners) {
+      listener(view)
+    }
+  }
+
+  const requestBody = (currentClipId: string): CandidateRequest => {
+    const context = contextFor()
+    const body: CandidateRequest = {
+      commercial: track?.mode === 'commercial',
+      currentClipId,
+      historyIds: live.historyIds.slice(-HISTORY_LIMIT),
+      limit: CANDIDATE_LIMIT,
+    }
+    if (live.direction !== undefined) {
+      body.direction = live.direction
+    }
+    if (context.nextSection !== undefined) {
+      body.nextSection = context.nextSection
+    }
+    if (context.section !== undefined) {
+      body.section = context.section
+    }
+    if (track !== undefined) {
+      body.trackId = track.id
+    }
+    return body
+  }
+
+  const request = async (): Promise<void> => {
+    if (stopped) {
+      return
+    }
+
+    const current = controlSnapshot.current.clipId
+    live = beginRequest(live, current)
+    const { requestId } = live
+    notify()
+
+    try {
+      const [, response] = await Promise.all([ensureLibrary(), fetchCandidates(requestBody(current))])
+      if (stopped || requestId !== live.requestId) {
+        return
+      }
+
+      await ensureClips(response.candidates.map((candidate) => candidate.clipId))
+      if (stopped || requestId !== live.requestId) {
+        return
+      }
+
+      // A candidate whose code could not be fetched cannot be staged, so it is not offered: a card
+      // the performer can click that silently does nothing is worse than two honest ones.
+      const playable = {
+        ...response,
+        candidates: response.candidates.filter((candidate) => clips.has(candidate.clipId)),
+      }
+      live = applyCandidates(live, requestId, playable, new Map([...summaries, ...clips]))
+      syncNext({ performer: false })
+    } catch (error) {
+      live = failRequest(live, requestId, error instanceof Error ? error.message : 'unknown error')
+    }
+
+    if (!stopped) {
+      notify()
+    }
+  }
+
+  const onControl = (snapshotNext: ControlSnapshot): void => {
+    controlSnapshot = snapshotNext
+
+    if (lastCurrent === undefined) {
+      lastCurrent = snapshotNext.current.clipId
+      if (!requestedOnce) {
+        requestedOnce = true
+        void request()
+      }
+    } else if (lastCurrent !== snapshotNext.current.clipId) {
+      live = pushHistory(live, lastCurrent)
+      if (stagedTransition !== undefined) {
+        live = {
+          ...live,
+          recentTransitions: [...live.recentTransitions, stagedTransition.kind].slice(-RECENT_LIMIT),
+        }
+      }
+      live = { ...live, pickedClipId: undefined, transition: undefined, transitionPicked: false }
+      lastCurrent = snapshotNext.current.clipId
+      void request()
+    }
+
+    syncNext({ performer: false })
+    notify()
+  }
+
+  const unsubscribe = control.subscribe(onControl)
+
+  return {
+    chooseTransition: (transition) => {
+      live = chooseTransitionManually(live, transition)
+      syncNext({ performer: true })
+      notify()
+    },
+    clearDirection: () => {
+      live = { ...live, direction: undefined }
+      void request()
+      notify()
+    },
+    getSnapshot: snapshot,
+    interpret: (text) => {
+      const trimmed = text.trim()
+      if (trimmed === '') {
+        return
+      }
+      live = { ...live, direction: interpretDirection(trimmed, now()) }
+      void request()
+      notify()
+    },
+    key: (event, keyOptions) => {
+      const action = keyAction(event, {
+        chatFocused: keyOptions.chatFocused,
+        textEntry: isTextEntry(event.target),
+      })
+      if (action === undefined) {
+        return false
+      }
+
+      switch (action.kind) {
+        case 'blackout': {
+          control.blackout()
+          return true
+        }
+        case 'chat': {
+          onChat()
+          return true
+        }
+        case 'close-chat': {
+          onCloseChat()
+          return true
+        }
+        case 'freeze': {
+          control.freeze()
+          return true
+        }
+        case 'go': {
+          control.go()
+          return true
+        }
+        case 'go-now': {
+          control.goNow()
+          return true
+        }
+        case 'hold': {
+          control.hold()
+          return true
+        }
+        case 'select-candidate': {
+          const candidate = live.candidates[action.index]
+          if (candidate === undefined) {
+            return false
+          }
+          live = pickCandidate(live, candidate.clipId)
+          syncNext({ performer: true })
+          notify()
+          return true
+        }
+        default: {
+          return false
+        }
+      }
+    },
+    pickCandidate: (clipId) => {
+      if (!live.candidates.some((candidate) => candidate.clipId === clipId)) {
+        return
+      }
+      live = pickCandidate(live, clipId)
+      syncNext({ performer: true })
+      notify()
+    },
+    setTrack: (next) => {
+      track = next
+      syncNext({ performer: true })
+      notify()
+    },
+    stop: () => {
+      stopped = true
+      unsubscribe()
+      listeners.clear()
+    },
+    subscribe: (listener) => {
+      listeners.add(listener)
+      listener(snapshot())
+      return () => {
+        listeners.delete(listener)
+      }
+    },
+  }
+}
