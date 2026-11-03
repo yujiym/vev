@@ -90,14 +90,15 @@ export const clipStillsRoutes = new Hono<{ Bindings: Env }>().post('/:id/stills'
   }
 
   const uploadId = crypto.randomUUID()
-  const keys = files.map((_, index) => stillKeyFor(id, uploadId, index))
+  const uploads = files.map((file, index) => ({ file, key: stillKeyFor(id, uploadId, index) }))
+  const keys = uploads.map((upload) => upload.key)
   try {
     // Settled, not `all`: a rejection must not return while the other puts are still landing, or
     // the cleanup below would run before the objects it has to delete exist.
     const puts = await Promise.allSettled(
-      files.map(
-        async (file, index) =>
-          await c.env.MEDIA.put(keys[index] ?? '', await file.arrayBuffer(), {
+      uploads.map(
+        async ({ file, key }) =>
+          await c.env.MEDIA.put(key, await file.arrayBuffer(), {
             httpMetadata: { contentType: 'image/jpeg' },
           }),
       ),
