@@ -388,19 +388,22 @@ await form.getByRole('button', { name: 'Run probe' }).click()
 await until(page, () => document.body.innerText.includes('Probe passed'))
 await form.getByRole('button', { name: 'Record thumbnail' }).click()
 await page.waitForTimeout(500)
-const lostProbe = await page.evaluate(() => {
-  for (const canvas of document.querySelectorAll('aside:not([hidden]) canvas')) {
-    const gl = canvas.getContext('webgl') ?? canvas.getContext('webgl2')
-    const extension = gl?.getExtension('WEBGL_lose_context')
-    if (extension && !gl.isContextLost()) {
-      extension.loseContext()
-      return true
-    }
+const lostRecording = await page.evaluate(() => {
+  // The canvas in the recording's own section: asking an idle canvas for a context would create one.
+  const canvas = document.querySelector('aside:not([hidden]) section canvas')
+  const gl = canvas?.getContext('webgl') ?? canvas?.getContext('experimental-webgl')
+  const extension = gl?.getExtension('WEBGL_lose_context')
+  if (!extension || gl.isContextLost()) {
+    return false
   }
-  return false
+  extension.loseContext()
+  return true
 })
-check('the probe’s own context was lost on purpose, mid-recording', lostProbe)
-await until(page, () => !document.body.innerText.includes('Recording…'), { timeout: 15_000 })
+check('the recording’s own context was lost on purpose, mid-recording', lostRecording)
+const recordingEnded = await until(page, () => !document.body.innerText.includes('Recording…'), {
+  timeout: 15_000,
+})
+check('the recording ended rather than hanging', recordingEnded, flat(await form.innerText()).slice(-160))
 check('the show survives a lost registration context', await moving())
 
 // --- fullscreen ---
