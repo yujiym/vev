@@ -47,6 +47,7 @@ export const clipsTable = sqliteTable(
     reviewed: integer('reviewed', { mode: 'boolean' }).notNull(),
     slug: text('slug').notNull().unique(),
     sourceUrl: text('source_url'),
+    stillKeys: text('still_keys', { mode: 'json' }).$type<string[]>(),
     tags: text('tags', { mode: 'json' }).$type<string[]>(),
     thumbnailKey: text('thumbnail_key'),
     title: text('title').notNull(),

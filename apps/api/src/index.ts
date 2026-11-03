@@ -10,6 +10,7 @@ import { settingsTable } from './db/schema.ts'
 import type { Env } from './env.ts'
 import { clipsRoutes } from './routes/clips.ts'
 import { clipThumbnailRoutes, mediaRoutes } from './routes/media.ts'
+import { clipStillsRoutes } from './routes/stills.ts'
 import { tracksRoutes } from './routes/tracks.ts'
 
 const api = new Hono<{ Bindings: Env }>().basePath('/api')
@@ -41,6 +42,7 @@ const routes = api.get('/health', async (c) => {
 const withLibrary = routes
   .route('/clips', clipsRoutes)
   .route('/clips', clipThumbnailRoutes)
+  .route('/clips', clipStillsRoutes)
   .route('/tracks', tracksRoutes)
 
 export type AppType = typeof withLibrary
